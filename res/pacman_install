@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -e
+
+case $1 in
+  install)
+	cp /usr/share/bgdesk/files/bgdesk.service /etc/systemd/system/bgdesk.service
+	cp /usr/share/bgdesk/files/bgdesk.desktop /usr/share/applications/
+	cp /usr/share/bgdesk/files/bgdesk-link.desktop /usr/share/applications/
+	systemctl daemon-reload
+	systemctl enable bgdesk
+	systemctl start bgdesk
+	update-desktop-database
+	;;
+  upgrade)
+    systemctl stop bgdesk || true
+    sleep 1
+	cp /usr/share/bgdesk/files/bgdesk.service /etc/systemd/system/bgdesk.service
+	cp /usr/share/bgdesk/files/bgdesk.desktop /usr/share/applications/
+	cp /usr/share/bgdesk/files/bgdesk-link.desktop /usr/share/applications/
+	systemctl daemon-reload
+	systemctl enable bgdesk
+	systemctl start bgdesk
+	update-desktop-database
+	;;
+  remove)
+	systemctl stop bgdesk || true
+	systemctl disable bgdesk || true
+	rm /etc/systemd/system/bgdesk.service || true
+	rm /usr/share/applications/bgdesk.desktop || true
+	rm /usr/share/applications/bgdesk-link.desktop || true
+	update-desktop-database
+	;;
+esac
+
+exit 0

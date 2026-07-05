@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=BGDeskURL Scheme Handler
+NoDisplay=true
+MimeType=x-scheme-handler/bgdesk;
+TryExec=bgdesk
+Exec=bgdesk %u
+Icon=bgdesk
+Terminal=false
+Type=Application
+StartupNotify=false

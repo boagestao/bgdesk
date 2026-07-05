@@ -1,0 +1,54 @@
+diff --git a/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngine.mm b/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngine.mm
+index d60fa92743a..64c72a80289 100644
+--- a/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngine.mm
++++ b/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngine.mm
+@@ -1654,11 +1654,18 @@ - (void)setApplicationState:(flutter::AppLifecycleState)state {
+  */
+ - (void)handleWillBecomeActive:(NSNotification*)notification {
+   _active = YES;
+-  if (!_visible) {
+-    [self setApplicationState:flutter::AppLifecycleState::kHidden];
+-  } else {
+-    [self setApplicationState:flutter::AppLifecycleState::kResumed];
+-  }
++  // An application that is becoming active is frontmost and visible to the user,
++  // so it should resume. `_visible` is only updated by handleDidChangeOcclusionState,
++  // and macOS does not reliably deliver a DidChangeOcclusionState(visible)
++  // notification on every occlusion->visible transition (e.g. returning to the app
++  // on the same screen via Cmd-Tab or Mission Control). When that notification is
++  // missed, `_visible` stays stale-NO, this method sends kHidden, and the framework
++  // keeps frames disabled and animations muted — the UI appears frozen until the
++  // app is occluded and revealed again in a way that does fire the notification.
++  // Becoming active is itself an authoritative "visible" signal, so honor it here.
++  // https://github.com/flutter/flutter/issues/155977
++  _visible = YES;
++  [self setApplicationState:flutter::AppLifecycleState::kResumed];
+ }
+ 
+ /**
+diff --git a/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngineTest.mm b/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngineTest.mm
+index b984005085a..6213f06b1a5 100644
+--- a/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngineTest.mm
++++ b/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngineTest.mm
+@@ -1227,11 +1227,19 @@ @implementation MockableFlutterEngine
+   [engineMock handleDidChangeOcclusionState:didChangeOcclusionState];
+   EXPECT_EQ(sentState, flutter::AppLifecycleState::kHidden);
+ 
++  // Becoming active resumes the app even though the occlusion state still reads
++  // not-visible at this point. macOS does not reliably deliver a
++  // DidChangeOcclusionState(visible) notification on every occlusion->visible
++  // transition (e.g. a same-screen Cmd-Tab / Mission Control return), so relying
++  // on the stale visibility here would leave the app stuck in kHidden with a
++  // frozen UI. Regression test for https://github.com/flutter/flutter/issues/155977.
+   [engineMock handleWillBecomeActive:willBecomeActive];
+-  EXPECT_EQ(sentState, flutter::AppLifecycleState::kHidden);
++  EXPECT_EQ(sentState, flutter::AppLifecycleState::kResumed);
+ 
++  // The app is now active and considered visible, so resigning active makes it
++  // inactive (not hidden) until a real occlusion notification hides it.
+   [engineMock handleWillResignActive:willResignActive];
+-  EXPECT_EQ(sentState, flutter::AppLifecycleState::kHidden);
++  EXPECT_EQ(sentState, flutter::AppLifecycleState::kInactive);
+ 
+   [mockApplication stopMocking];
+ }

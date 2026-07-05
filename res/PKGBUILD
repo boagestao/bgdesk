@@ -1,0 +1,35 @@
+pkgname=bgdesk
+pkgver=1.4.8
+pkgrel=0
+epoch=
+pkgdesc="BGDesk remote desktop client"
+arch=('x86_64')
+url="https://boagestao.com.br"
+license=('AGPL-3.0')
+groups=()
+depends=('gtk3' 'xdotool' 'libxcb' 'libxfixes' 'alsa-lib' 'libva' 'libappindicator-gtk3' 'pam' 'gst-plugins-base' 'gst-plugin-pipewire')
+makedepends=()
+checkdepends=()
+optdepends=()
+provides=()
+conflicts=()
+replaces=()
+backup=()
+options=()
+install=pacman_install
+changelog=
+noextract=()
+md5sums=() #generate with 'makepkg -g'
+
+package() {
+  if [[ ${FLUTTER} ]]; then
+	  mkdir -p "${pkgdir}/usr/share/bgdesk" && cp -r ${HBB}/flutter/build/linux/x64/release/bundle/* -t "${pkgdir}/usr/share/bgdesk"
+  fi
+  mkdir -p "${pkgdir}/usr/bin"
+  pushd ${pkgdir} && ln -s /usr/share/bgdesk/bgdesk usr/bin/bgdesk && popd
+  install -Dm 644 $HBB/res/bgdesk.service -t "${pkgdir}/usr/share/bgdesk/files"
+  install -Dm 644 $HBB/res/bgdesk.desktop -t "${pkgdir}/usr/share/bgdesk/files"
+  install -Dm 644 $HBB/res/bgdesk-link.desktop -t "${pkgdir}/usr/share/bgdesk/files"
+  install -Dm 644 $HBB/res/128x128@2x.png "${pkgdir}/usr/share/icons/hicolor/256x256/apps/bgdesk.png"
+  install -Dm 644 $HBB/res/scalable.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/bgdesk.svg"
+}

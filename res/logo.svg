@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 32 32">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <path d="M22.6894531,28.2763672c-2.0419922-1.9453125-3.3144531-4.9814453-3.4902344-8.3291016-.0283203-.53125-.4667969-.9472656-.9990234-.9472656h-4.4003906c-.5317383,0-.9707031.4160156-.9985352.9472656-.1762695,3.3476562-1.4482422,6.3837891-3.4907227,8.328125-.2963867.2822266-.3911133.7167969-.2392578,1.0957031.1518555.3798828.5200195.6289062.9287109.6289062h12c.4091797,0,.7763672-.2490234.9287109-.6289062.1513672-.3789062.0566406-.8134766-.2392578-1.0947266Z" style="fill: #0e538c;"/>
+  <rect x="1" y="2" width="30" height="22" rx="3" ry="3" style="fill: #027af2;"/>
+  <line x1="14" y1="22" x2="18" y2="22" style="fill: none; stroke: #e3faff; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2px;"/>
+  <g id="Interface__x2F__Check">
+    <path id="Vector" d="M10.5,12l4.2999992,4.2999992,8.6000023-8.6000004" style="fill: none; stroke: #e3faff; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2px;"/>
+  </g>
+</svg>
