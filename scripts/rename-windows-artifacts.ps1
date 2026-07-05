@@ -19,6 +19,10 @@ function Rename-IfExists($dir, $from, $to) {
     $src = Join-Path $dir $from
     $dst = Join-Path $dir $to
     if (Test-Path $src) {
+        # remove the original file if it exists
+        if (Test-Path $dst) {
+            Remove-Item -Force $dst
+        }
         Move-Item -Force $src $dst
         Write-Host "[rename-windows-artifacts] $src -> $dst"
     }
