@@ -68,18 +68,18 @@ def ensure_cargo_on_path() -> None:
 ensure_cargo_on_path()
 
 
-def use_flutter_macos_pinned() -> bool:
-    """Flutter stable 3.44.6: apenas builds manuais macOS via ./build.sh."""
-    return osx and os.environ.get('BGDESK_FLUTTER_MACOS') == '1'
+def use_flutter_github() -> bool:
+    """Flutter master do GitHub: apenas builds manuais macOS via ./build.sh."""
+    return osx and os.environ.get('BGDESK_FLUTTER_GITHUB') == '1'
 
 
 def flutter_bin() -> str:
-    if use_flutter_macos_pinned():
+    if use_flutter_github():
         root = os.environ.get('FLUTTER_ROOT', '')
         if not root:
             sys.stderr.write(
                 'FLUTTER_ROOT não definido. Execute ./build.sh no macOS '
-                '(usa Flutter stable 3.44.6).\n')
+                '(usa Flutter master do GitHub).\n')
             sys.exit(1)
         cmd = os.path.join(root, 'bin', 'flutter')
         if not os.path.isfile(cmd):
@@ -90,25 +90,68 @@ def flutter_bin() -> str:
 
 
 def verify_flutter_root() -> None:
-    if not use_flutter_macos_pinned():
+    if not use_flutter_github():
         return
     cmd = flutter_bin()
     import subprocess
     result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
     out = result.stdout + result.stderr
-    expected = os.environ.get('FLUTTER_MACOS_VERSION', '3.44.6')
-    if 'channel stable' not in out or f'Flutter {expected}' not in out:
+    if 'channel master' not in out or 'github.com/flutter/flutter' not in out:
         sys.stderr.write(
-            f'ERRO: FLUTTER_ROOT não aponta para Flutter stable {expected}:\n' + out)
+            'ERRO: FLUTTER_ROOT não aponta para o Flutter master do GitHub:\n' + out)
         sys.exit(1)
+    expected_commit = os.environ.get('FLUTTER_GITHUB_COMMIT', '')
+    if expected_commit:
+        flutter_root = os.environ.get('FLUTTER_ROOT', '')
+        head = subprocess.run(
+            ['git', '-C', flutter_root, 'rev-parse', 'HEAD'],
+            capture_output=True, text=True)
+        actual = head.stdout.strip()
+        if actual != expected_commit:
+            sys.stderr.write(
+                f'ERRO: Flutter não está no commit fixo {expected_commit} (HEAD={actual})\n')
+            sys.exit(1)
     sys.stderr.write(f'[build.py] {out.splitlines()[0]}\n')
-    rev = os.environ.get('FLUTTER_MACOS_REV', '')
+    rev = os.environ.get('FLUTTER_GITHUB_REV', '')
+    pinned = os.environ.get('FLUTTER_GITHUB_COMMIT', '')
+    if pinned:
+        sys.stderr.write(f'[build.py] FLUTTER_GITHUB_COMMIT={pinned}\n')
     if rev:
-        sys.stderr.write(f'[build.py] FLUTTER_MACOS_REV={rev}\n')
+        sys.stderr.write(f'[build.py] FLUTTER_GITHUB_REV={rev}\n')
+
+
+def flutter_local_engine_flags() -> str:
+    """Flags --local-engine* quando há build local do engine (patch macOS d70a0d3)."""
+    if not osx:
+        return ''
+    root = os.environ.get('FLUTTER_ROOT', '')
+    if not root:
+        return ''
+    local = os.environ.get('FLUTTER_LOCAL_ENGINE', '')
+    host = os.environ.get('FLUTTER_LOCAL_ENGINE_HOST', local)
+    engine_src = os.environ.get('FLUTTER_ENGINE', '')
+    if not local:
+        mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x64'
+        config = f'host_release_{mac_arch}' if mac_arch == 'arm64' else 'host_release'
+        out = os.path.join(root, 'engine', 'src', 'out', config)
+        if os.path.isdir(out):
+            local = config
+            host = config
+        else:
+            return ''
+    if not engine_src:
+        engine_src = os.path.join(root, 'engine', 'src')
+    if not os.path.isdir(engine_src):
+        return ''
+    return (
+        f' --local-engine={local}'
+        f' --local-engine-host={host}'
+        f' --local-engine-src-path={engine_src}'
+    )
 
 
 def write_flutter_build_stamp() -> None:
-    if not use_flutter_macos_pinned():
+    if not use_flutter_github():
         return
     import subprocess
     cmd = flutter_bin()
@@ -117,12 +160,19 @@ def write_flutter_build_stamp() -> None:
     stamp_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
     stamp = stamp_dir / 'flutter-build-stamp.txt'
-    rev = os.environ.get('FLUTTER_MACOS_REV', '')
-    version = os.environ.get('FLUTTER_MACOS_VERSION', '3.44.6')
+    rev = os.environ.get('FLUTTER_GITHUB_REV', '')
+    patch_applied = os.environ.get('FLUTTER_ENGINE_PATCH_APPLIED', '')
+    local_flags = flutter_local_engine_flags()
+    extra = ''
+    if patch_applied:
+        extra += f'FLUTTER_ENGINE_PATCH=d70a0d3-macos-occlusion-resume applied={patch_applied}\n'
+    if local_flags:
+        extra += f'FLUTTER_LOCAL_ENGINE_FLAGS={local_flags.strip()}\n'
     stamp.write_text(
         f'FLUTTER_ROOT={os.environ.get("FLUTTER_ROOT", "")}\n'
-        f'FLUTTER_MACOS_VERSION={version}\n'
-        f'FLUTTER_MACOS_REV={rev}\n'
+        f'FLUTTER_GITHUB_COMMIT={os.environ.get("FLUTTER_GITHUB_COMMIT", "")}\n'
+        f'FLUTTER_GITHUB_REV={rev}\n'
+        f'{extra}'
         f'{result.stdout}{result.stderr}',
         encoding='utf-8',
     )
@@ -563,8 +613,20 @@ def build_flutter_dmg(version, features):
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
     mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
+    local_flags = ''
+    if use_flutter_github():
+        # Rebuild completo para garantir que o engine/framework venha do Flutter master atual.
+        system2(f'{flutter} clean')
+        system2(f'{flutter} pub get')
+        local_flags = flutter_local_engine_flags()
+        if local_flags:
+            sys.stderr.write(f'[build.py] engine local:{local_flags}\n')
+        elif os.environ.get('FLUTTER_ENGINE_PATCH_APPLIED') == '1':
+            sys.stderr.write(
+                '[build.py] AVISO: patch d70a0d3 aplicado no source do engine, mas sem build local.\n'
+                '[build.py] Rode ./scripts/build-flutter-local-engine-macos.sh para o fix entrar no app.\n')
     system2(
-        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES {flutter} build macos --release')
+        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES {flutter} build macos --release{local_flags}')
     write_flutter_build_stamp()
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/BGDesk.app/Contents/MacOS/')
     '''

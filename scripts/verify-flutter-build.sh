@@ -49,4 +49,12 @@ if ! grep -q "github.com/flutter/flutter" "$STAMP_FILE"; then
   exit 1
 fi
 
-echo "OK — app compilado com Flutter master do GitHub."
+PIN_FILE="$(cd "$(dirname "$0")" && pwd)/flutter-github-commit"
+if [[ -f "$PIN_FILE" ]]; then
+  PIN_COMMIT="$(grep -v '^[[:space:]]*#' "$PIN_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '[:space:]')"
+  if [[ -n "$PIN_COMMIT" ]] && ! grep -qF "$PIN_COMMIT" "$STAMP_FILE"; then
+    echo "AVISO: stamp não corresponde ao commit fixo em scripts/flutter-github-commit ($PIN_COMMIT)."
+  fi
+fi
+
+echo "OK — app compilado com Flutter master do GitHub (commit fixo)."

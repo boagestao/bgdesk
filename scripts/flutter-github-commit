@@ -1,0 +1,9 @@
+# flutter/flutter — commit fixo para builds macOS locais (./build.sh mac).
+# Branch de origem: master
+#
+# Versão observada: Flutter 3.46.0-1.0.pre-508 (channel master)
+# Mensagem do commit: [web] Roll Chrome to 145 (framework) (#182861)
+#
+# Atualize este arquivo somente após validar um build macOS completo.
+# Para re-sincronizar o clone local com este commit: ./build.sh mac --flutter
+37b8446840a6c6345b9105389579d152671359aa

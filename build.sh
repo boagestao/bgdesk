@@ -75,7 +75,7 @@ Opções:
   --force, -f, force  Recompilação completa (Linux: limpa target/release,
                       flutter build e pacotes). Não regenera o bridge.
   --rebuild-image     Reconstrói a imagem Docker do build Linux.
-  --flutter           Remove e reinstala o Flutter SDK macOS (3.44.6 stable).
+  --flutter           Re-sincroniza o clone Flutter com o commit fixo (macOS).
   --help, -h, help    Mostra esta ajuda.
 
 Exemplos:
@@ -151,7 +151,7 @@ ANDROID_NDK_HOME=/Users/belizario/Library/Android/sdk/ndk/27.2.12479018
 log_flutter_for_build() {
   echo "[build] Flutter: $(flutter --version 2>/dev/null | head -1)"
   echo "[build] FLUTTER_ROOT=$FLUTTER_ROOT"
-  echo "[build] FLUTTER_MACOS_REV=${FLUTTER_MACOS_REV:-?}"
+  echo "[build] FLUTTER_GITHUB_REV=${FLUTTER_GITHUB_REV:-?}"
   echo "[build] which flutter: $(command -v flutter)"
 }
 
@@ -298,13 +298,20 @@ buildWindows()
     fi
 }
 
-setup_macos_flutter() {
-  export BGDESK_FLUTTER_MACOS=1
-  # Flutter stable 3.44.6 — build manual macOS; ver scripts/setup-flutter-macos.sh
+ensure_local_flutter_engine() {
+  [[ "$FLUTTER_UPDATE" == "1" ]] || return 0
+  local engine_out="$FLUTTER_ROOT/engine/src/out/host_release_arm64/FlutterMacOS.framework"
+  [[ "${FLUTTER_ENGINE_PATCH_APPLIED:-}" == "1" ]] || return 0
+  [[ -f "$engine_out/Versions/A/FlutterMacOS" ]] && return 0
+  echo "[build] engine local não encontrado; compilando (pode demorar)..."
+  "$ROOT/scripts/build-flutter-local-engine-macos.sh"
+}
+
+setup_macos_flutter_github() {
+  export BGDESK_FLUTTER_GITHUB=1
+  # Flutter do GitHub (commit fixo em scripts/flutter-github-commit) — build manual macOS
   # shellcheck source=/dev/null
-  source "$ROOT/scripts/setup-flutter-macos.sh"
-  export BGDESK_FLUTTER_READY=1
-  export FLUTTER_UPDATE=0
+  source "$ROOT/scripts/setup-flutter-github.sh"
 }
 
 ensure_macos_vcpkg() {
@@ -334,9 +341,10 @@ buildMac()
       export VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-osx}"
     fi
     ensure_macos_vcpkg
-    setup_macos_flutter
-    # Flutter 3.44 precisa dos renames DialogTheme/TabBarTheme e deps novas.
+    setup_macos_flutter_github
+    # Flutter master precisa dos renames DialogTheme/TabBarTheme e deps novas.
     bash "$ROOT/.github/patches/apply_flutter_3.44_source_patches.sh"
+    ensure_local_flutter_engine
     ensure_bridge
     log_flutter_for_build
     local BUILD_ARGS=(--flutter --hwcodec --unix-file-copy-paste)
