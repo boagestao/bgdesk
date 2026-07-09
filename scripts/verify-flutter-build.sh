@@ -39,13 +39,13 @@ else
   exit 1
 fi
 
-if ! grep -q "channel master" "$STAMP_FILE"; then
-  echo "ERRO: stamp não indica channel master."
+if ! grep -q "github.com/flutter/flutter" "$STAMP_FILE"; then
+  echo "ERRO: stamp não indica repositório GitHub oficial."
   exit 1
 fi
 
-if ! grep -q "github.com/flutter/flutter" "$STAMP_FILE"; then
-  echo "ERRO: stamp não indica repositório GitHub oficial."
+if ! grep -Eq 'channel (master|\[user-branch\])' "$STAMP_FILE"; then
+  echo "ERRO: stamp não indica channel master ou commit fixo ([user-branch])."
   exit 1
 fi
 

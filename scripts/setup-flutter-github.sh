@@ -145,16 +145,18 @@ verify_flutter_github() {
   atual:    $current"
   fi
 
-  local version_line
+  local version_line version_out
   version_line="$(flutter --version 2>/dev/null | head -1 || true)"
+  version_out="$(flutter --version 2>&1 || true)"
 
-  if ! flutter --version 2>&1 | grep -q "channel master"; then
-    die "Flutter não está no channel master:
-$(flutter --version 2>&1 | head -3)"
+  if ! grep -q "github.com/flutter/flutter" <<< "$version_out"; then
+    die "Flutter não parece ser o clone oficial do GitHub"
   fi
 
-  if ! flutter --version 2>&1 | grep -q "github.com/flutter/flutter"; then
-    die "Flutter não parece ser o clone oficial do GitHub"
+  # Checkout em commit fixo (detached HEAD) reporta channel [user-branch], não master.
+  if ! grep -Eq 'channel (master|\[user-branch\])' <<< "$version_out"; then
+    die "Flutter não parece ser o clone GitHub master/fixado:
+$version_out"
   fi
 
   log "OK — $version_line"

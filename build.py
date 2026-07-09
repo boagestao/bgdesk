@@ -96,9 +96,9 @@ def verify_flutter_root() -> None:
     import subprocess
     result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
     out = result.stdout + result.stderr
-    if 'channel master' not in out or 'github.com/flutter/flutter' not in out:
+    if 'github.com/flutter/flutter' not in out:
         sys.stderr.write(
-            'ERRO: FLUTTER_ROOT não aponta para o Flutter master do GitHub:\n' + out)
+            'ERRO: FLUTTER_ROOT não aponta para o clone oficial do GitHub:\n' + out)
         sys.exit(1)
     expected_commit = os.environ.get('FLUTTER_GITHUB_COMMIT', '')
     if expected_commit:

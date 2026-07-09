@@ -41,4 +41,8 @@ class AppDelegate: FlutterAppDelegate {
         launched = true;
         NSApplication.shared.activate(ignoringOtherApps: true);
     }
+
+    override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        return true
+    }
 }
