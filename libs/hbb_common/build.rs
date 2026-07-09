@@ -36,10 +36,22 @@ fn gen_bgdesk_config() {
 
     let settings: toml::Table = content.parse().expect("invalid config/settings.toml");
 
-    let rendezvous_server = required_string(&settings, "rendezvous_server");
+    let is_debug = std::env::var("PROFILE").unwrap_or_default() == "debug";
+    let incoming_only = std::env::var("CARGO_FEATURE_INCOMING_ONLY").is_ok();
+
+    let mut rendezvous_server = required_string(&settings, "rendezvous_server");
+    if is_debug {
+        rendezvous_server = "127.0.0.1".to_owned();
+    }
     let api_server = required_string(&settings, "api_server");
     let version_check_url = required_string(&settings, "version_check_url");
-    let rs_pub_key = required_string(&settings, "rs_pub_key");
+    let rs_pub_key_cliente = required_string(&settings, "rs_pub_key");
+    let rs_pub_key_suporte = required_string(&settings, "rs_pub_key_suporte");
+    let rs_pub_key = if incoming_only {
+        rs_pub_key_cliente.clone()
+    } else {
+        rs_pub_key_suporte.clone()
+    };
     let link_docs_home = required_string(&settings, "link_docs_home");
     let link_docs_x11_required = required_string(&settings, "link_docs_x11_required");
     let link_headless_linux_support = required_string(&settings, "link_headless_linux_support");
@@ -59,13 +71,25 @@ fn gen_bgdesk_config() {
     writeln!(
         file,
         "pub const RENDEZVOUS_SERVERS: &[&str] = &[\"{}\"];",
-        escape(rendezvous_server)
+        escape(&rendezvous_server)
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "pub const RS_PUB_KEY_CLIENTE: &str = \"{}\";",
+        escape(&rs_pub_key_cliente)
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "pub const RS_PUB_KEY_SUPORTE: &str = \"{}\";",
+        escape(&rs_pub_key_suporte)
     )
     .unwrap();
     writeln!(
         file,
         "pub const RS_PUB_KEY: &str = \"{}\";",
-        escape(rs_pub_key)
+        escape(&rs_pub_key)
     )
     .unwrap();
     writeln!(
@@ -98,7 +122,15 @@ fn gen_bgdesk_config() {
         escape(link_headless_linux_support)
     )
     .unwrap();
-    write_hashmap_fn(&mut file, "bgdesk_default_settings", defaults).unwrap();
+    write_default_settings_fn(
+        &mut file,
+        defaults,
+        &rs_pub_key_cliente,
+        &rs_pub_key_suporte,
+        incoming_only,
+        is_debug,
+    )
+    .unwrap();
     write_hashmap_fn(&mut file, "bgdesk_hard_settings", hard).unwrap();
     write_hashmap_fn(&mut file, "bgdesk_builtin_settings", builtin).unwrap();
 }
@@ -123,6 +155,54 @@ fn escape(value: impl AsRef<str>) -> String {
         .as_ref()
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+}
+
+fn write_default_settings_fn(
+    file: &mut std::fs::File,
+    table: &toml::Table,
+    rs_pub_key_cliente: &str,
+    rs_pub_key_suporte: &str,
+    incoming_only: bool,
+    is_debug: bool,
+) -> std::io::Result<()> {
+    let default_key = if incoming_only {
+        rs_pub_key_cliente
+    } else {
+        rs_pub_key_suporte
+    };
+    let mut entries: Vec<(String, String)> = table
+        .iter()
+        .filter_map(|(key, value)| {
+            if key == "key_suporte" {
+                return None;
+            }
+            let value = value.as_str().unwrap_or_else(|| {
+                panic!("config/settings.toml: `[defaults]` key `{key}` must be a string")
+            });
+            Some((key.clone(), value.to_owned()))
+        })
+        .collect();
+    for (key, value) in &mut entries {
+        if key == "key" {
+            *value = default_key.to_owned();
+        } else if is_debug && key == "custom-rendezvous-server" {
+            *value = "127.0.0.1".to_owned();
+        }
+    }
+    writeln!(file, "pub fn bgdesk_default_settings() -> HashMap<String, String> {{")?;
+    writeln!(file, "    HashMap::from([")?;
+    for (idx, (key, value)) in entries.iter().enumerate() {
+        let comma = if idx + 1 == entries.len() { "" } else { "," };
+        writeln!(
+            file,
+            "        (\"{}\".to_string(), \"{}\".to_string()){comma}",
+            escape(key),
+            escape(value)
+        )?;
+    }
+    writeln!(file, "    ])")?;
+    writeln!(file, "}}")?;
+    Ok(())
 }
 
 fn write_hashmap_fn(
