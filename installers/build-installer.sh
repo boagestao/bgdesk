@@ -5,16 +5,26 @@
 #   ./installers/build-installer.sh suporte
 #   ./installers/build-installer.sh cliente
 #
-# Saída: build/bgdesk-suporte-win64.exe ou build/bgdesk-cliente-win64.exe
+# Saída: build/windows-x86_64-suporte/bgdesk-suporte-win64.exe
+#        build/windows-x86_64-cliente/bgdesk-cliente-win64.exe
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=scripts/build-out-dir.sh
+source "$ROOT/scripts/build-out-dir.sh"
+
 MODE="${1:-}"
 if [[ "$MODE" != "suporte" && "$MODE" != "cliente" ]]; then
   echo "[installer] Uso: $0 suporte|cliente" >&2
   exit 1
+fi
+
+if [[ "$MODE" == "cliente" ]]; then
+  export BGDESK_CLIENTE=1
+else
+  export BGDESK_CLIENTE=0
 fi
 
 log() { echo "[installer] $*"; }
@@ -46,9 +56,9 @@ find_iscc() {
 }
 
 ISS_FILE="$ROOT/installers/${MODE}.iss"
-WIN_OUT_DIR="$ROOT/build/windows-${MODE}"
+WIN_OUT_DIR="$ROOT/$(bgdesk_build_out_dir windows x86_64)"
 INSTALLER_BASE="bgdesk-${MODE}-win64"
-INSTALLER_OUT="$ROOT/build/${INSTALLER_BASE}.exe"
+INSTALLER_OUT="$WIN_OUT_DIR/${INSTALLER_BASE}.exe"
 
 if [[ ! -f "$ISS_FILE" ]]; then
   echo "[installer] ERRO: script não encontrado: $ISS_FILE" >&2
@@ -69,13 +79,13 @@ if ! ISCC="$(find_iscc)"; then
   warn "Inno Setup (ISCC) não encontrado."
   warn "Instale em https://jrsoftware.org/isinfo.php"
   warn "Ou defina INNO_SETUP_DIR apontando para a pasta do Inno Setup 6."
-  warn "Instalador não gerado; artefatos em build/windows-${MODE}/"
+  warn "Instalador não gerado; artefatos em $(bgdesk_build_out_dir windows x86_64)/"
   exit 0
 fi
 
-mkdir -p "$ROOT/build"
+mkdir -p "$WIN_OUT_DIR"
 log "compilando $INSTALLER_BASE.exe ..."
-"$ISCC" "$ISS_FILE"
+"$ISCC" "/DBuildOutSubdir=$(basename "$WIN_OUT_DIR")" "$ISS_FILE"
 
 if [[ ! -f "$INSTALLER_OUT" ]]; then
   echo "[installer] ERRO: saída esperada não encontrada: $INSTALLER_OUT" >&2

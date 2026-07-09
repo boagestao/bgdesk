@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Gera generated_bridge.dart + generated_bridge.freezed.dart + bridge Rust.
 #
-# Usa Flutter GitHub master para o codegen principal e Flutter stable 3.22
-# apenas para build_runner/freezed (Dart 3.13 do master quebra build_runner).
+# macOS: Flutter stable 3.44.6 (setup-flutter-macos.sh).
+# Outras plataformas: Flutter stable 3.29 apenas para build_runner/freezed quando
+# o Flutter principal não suporta build_runner.
 
 set -euo pipefail
 
@@ -33,7 +34,11 @@ setup_bridge_flutter() {
     os="$(uname -s)"
     arch="$(uname -m)"
     if [[ "$os" == "Darwin" ]]; then
-      archive="flutter_macos_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+      if [[ "$arch" == "arm64" ]]; then
+        archive="flutter_macos_arm64_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+      else
+        archive="flutter_macos_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+      fi
       url="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${archive}"
       curl -L "$url" -o "/tmp/${archive}"
       rm -rf "$FLUTTER_BRIDGE_DIR"
@@ -51,12 +56,33 @@ setup_bridge_flutter() {
   fi
 }
 
-# shellcheck source=/dev/null
-source "$ROOT/scripts/setup-flutter-github.sh"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ -n "${FLUTTER_ROOT:-}" && -x "${FLUTTER_ROOT}/bin/flutter" ]]; then
+    export PATH="${FLUTTER_ROOT}/bin:$PATH"
+    FLUTTER_BRIDGE_DIR="$FLUTTER_ROOT"
+    log "usando Flutter já configurado: $FLUTTER_ROOT"
+  else
+    # shellcheck source=/dev/null
+    source "$ROOT/scripts/setup-flutter-macos.sh"
+    FLUTTER_BRIDGE_DIR="$FLUTTER_ROOT"
+  fi
+else
+  if ! command -v flutter >/dev/null 2>&1; then
+    echo "[bridge] ERRO: flutter não encontrado no PATH"
+    exit 1
+  fi
+fi
 
 if ! command -v flutter_rust_bridge_codegen &>/dev/null; then
   cargo install flutter_rust_bridge_codegen --version 1.80.1 --features "uuid" --locked
 fi
+
+log "resolvendo dependências Dart (flutter pub get)..."
+(
+  export PATH="${FLUTTER_BRIDGE_DIR}/bin:$PATH"
+  cd "$ROOT/flutter"
+  flutter pub get
+)
 
 log "gerando bridge (Rust + Dart, sem build_runner)..."
 flutter_rust_bridge_codegen --no-build-runner \
@@ -66,13 +92,13 @@ flutter_rust_bridge_codegen --no-build-runner \
 
 cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
 
-setup_bridge_flutter
-log "gerando generated_bridge.freezed.dart com Flutter $FLUTTER_BRIDGE_VERSION..."
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  setup_bridge_flutter
+fi
+log "gerando generated_bridge.freezed.dart..."
 (
   export PATH="$FLUTTER_BRIDGE_DIR/bin:$PATH"
   cd "$ROOT/flutter"
-  # build_runner precisa das deps do pubspec atual
-  flutter pub get
   flutter pub run build_runner build --delete-conflicting-outputs
 )
 

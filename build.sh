@@ -75,7 +75,7 @@ Opções:
   --force, -f, force  Recompilação completa (Linux: limpa target/release,
                       flutter build e pacotes). Não regenera o bridge.
   --rebuild-image     Reconstrói a imagem Docker do build Linux.
-  --flutter           Atualiza/usa engine Flutter local (macOS).
+  --flutter           Remove e reinstala o Flutter SDK macOS (3.44.6 stable).
   --help, -h, help    Mostra esta ajuda.
 
 Exemplos:
@@ -94,7 +94,7 @@ Notas:
   - No Linux, o cache Cargo (target/) fica em volume Docker nativo
     (bgdesk-target-aarch64 / bgdesk-target-x86_64), não no bind-mount do host.
   - Bridge só é recriado com --build-bridges ou se os arquivos não existirem.
-  - Artefatos ficam em build/.
+  - Artefatos ficam em build/<plataforma>-<arch>-<modo>/ (ex.: build/linux-aarch64-cliente/).
   - Windows: gera instalador Inno Setup (bgdesk-suporte-win64.exe /
     bgdesk-cliente-win64.exe) se ISCC estiver instalado.
 EOF
@@ -143,18 +143,15 @@ fi
 
 FORCED_PLATFORM=${REMAINING_ARGS[0]:-}
 
-# Só limpa build/ em builds de plataforma (não em --build-bridges sozinho)
-if [[ -n "$FORCED_PLATFORM" || "$BGDESK_CLIENTE" == "1" || "$BUILD_BRIDGES" != "1" ]]; then
-  rm -rf build
-  mkdir -p build
-fi
+# shellcheck source=scripts/build-out-dir.sh
+source "$ROOT/scripts/build-out-dir.sh"
 
 ANDROID_NDK_HOME=/Users/belizario/Library/Android/sdk/ndk/27.2.12479018
 
 log_flutter_for_build() {
   echo "[build] Flutter: $(flutter --version 2>/dev/null | head -1)"
   echo "[build] FLUTTER_ROOT=$FLUTTER_ROOT"
-  echo "[build] FLUTTER_GITHUB_REV=${FLUTTER_GITHUB_REV:-?}"
+  echo "[build] FLUTTER_MACOS_REV=${FLUTTER_MACOS_REV:-?}"
   echo "[build] which flutter: $(command -v flutter)"
 }
 
@@ -267,10 +264,11 @@ buildWindows()
     ensure_cargo
     setup_windows_build_env
     ensure_bridge
-    local WIN_OUT_DIR="build/windows-suporte"
+    local WIN_OUT_DIR
+    WIN_OUT_DIR="$(bgdesk_build_out_dir windows x86_64)"
+    bgdesk_prepare_build_out_dir "$WIN_OUT_DIR"
     local BUILD_ARGS=(--flutter --skip-portable-pack)
     if [[ "$BGDESK_CLIENTE" == "1" ]]; then
-      WIN_OUT_DIR="build/windows-cliente"
       BUILD_ARGS+=(--incoming-only)
       echo "[build] modo cliente (somente conexões recebidas)"
     else
@@ -280,8 +278,6 @@ buildWindows()
     echo "[build] VCPKG_ROOT=$VCPKG_ROOT"
     echo "[build] LIBCLANG_PATH=$LIBCLANG_PATH"
     $PYTHON build.py "${BUILD_ARGS[@]}"
-    rm -rf "$WIN_OUT_DIR"
-    mkdir -p "$WIN_OUT_DIR"
     cp -r flutter/build/windows/x64/runner/Release/. "$WIN_OUT_DIR"/.
     if [[ -f "$WIN_OUT_DIR/rustdesk.exe" ]]; then
       cp "$WIN_OUT_DIR/rustdesk.exe" "$WIN_OUT_DIR/bgdesk.exe"
@@ -297,25 +293,18 @@ buildWindows()
     echo "=== Build Windows concluído ==="
     echo "Pasta: $ROOT/$WIN_OUT_DIR/"
     ls -la "$WIN_OUT_DIR/bgdesk.exe" 2>/dev/null || true
-    if [[ -f "$ROOT/build/bgdesk-${INSTALLER_MODE}-win64.exe" ]]; then
-      ls -la "$ROOT/build/bgdesk-${INSTALLER_MODE}-win64.exe"
+    if [[ -f "$ROOT/$WIN_OUT_DIR/bgdesk-${INSTALLER_MODE}-win64.exe" ]]; then
+      ls -la "$ROOT/$WIN_OUT_DIR/bgdesk-${INSTALLER_MODE}-win64.exe"
     fi
 }
 
-ensure_local_flutter_engine() {
-  [[ "$FLUTTER_UPDATE" == "1" ]] || return 0
-  local engine_out="$FLUTTER_ROOT/engine/src/out/host_release_arm64/FlutterMacOS.framework"
-  [[ "${FLUTTER_ENGINE_PATCH_APPLIED:-}" == "1" ]] || return 0
-  [[ -f "$engine_out/Versions/A/FlutterMacOS" ]] && return 0
-  echo "[build] engine local não encontrado; compilando (pode demorar)..."
-  "$ROOT/scripts/build-flutter-local-engine-macos.sh"
-}
-
-setup_macos_flutter_github() {
-  export BGDESK_FLUTTER_GITHUB=1
-  # Flutter do GitHub (branch master) — somente build manual macOS; ver scripts/setup-flutter-github.sh
+setup_macos_flutter() {
+  export BGDESK_FLUTTER_MACOS=1
+  # Flutter stable 3.44.6 — build manual macOS; ver scripts/setup-flutter-macos.sh
   # shellcheck source=/dev/null
-  source "$ROOT/scripts/setup-flutter-github.sh"
+  source "$ROOT/scripts/setup-flutter-macos.sh"
+  export BGDESK_FLUTTER_READY=1
+  export FLUTTER_UPDATE=0
 }
 
 ensure_macos_vcpkg() {
@@ -345,10 +334,9 @@ buildMac()
       export VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-osx}"
     fi
     ensure_macos_vcpkg
-    setup_macos_flutter_github
-    # Flutter master precisa dos renames DialogTheme/TabBarTheme e deps novas.
+    setup_macos_flutter
+    # Flutter 3.44 precisa dos renames DialogTheme/TabBarTheme e deps novas.
     bash "$ROOT/.github/patches/apply_flutter_3.44_source_patches.sh"
-    ensure_local_flutter_engine
     ensure_bridge
     log_flutter_for_build
     local BUILD_ARGS=(--flutter --hwcodec --unix-file-copy-paste)
@@ -356,6 +344,9 @@ buildMac()
       BUILD_ARGS+=(--incoming-only)
       echo "[build] modo cliente (somente conexões recebidas)"
     fi
+    local MAC_OUT_DIR
+    MAC_OUT_DIR="$(bgdesk_build_out_dir macOS "$ARCH")"
+    bgdesk_prepare_build_out_dir "$MAC_OUT_DIR"
     $PYTHON build.py "${BUILD_ARGS[@]}"
     STAMP_SRC="build/flutter-build-stamp.txt"
     [[ -f "$STAMP_SRC" ]] || STAMP_SRC="flutter/build/flutter-build-stamp.txt"
@@ -364,13 +355,11 @@ buildMac()
       cp "$STAMP_SRC" \
         flutter/build/macos/Build/Products/Release/BGDesk.app/Contents/Resources/flutter-build-stamp.txt
     fi
-    mv flutter/build/macos/Build/Products/Release/BGDesk.app ./build/BGDesk.app
+    mv flutter/build/macos/Build/Products/Release/BGDesk.app "$MAC_OUT_DIR/BGDesk.app"
     if [[ -f "$STAMP_SRC" ]]; then
-      mkdir -p ./build/BGDesk.app/Contents/Resources
-      cp "$STAMP_SRC" ./build/BGDesk.app/Contents/Resources/flutter-build-stamp.txt
-      if [[ "$(cd "$(dirname "$STAMP_SRC")" && pwd)/$(basename "$STAMP_SRC")" != "$(pwd)/build/flutter-build-stamp.txt" ]]; then
-        cp "$STAMP_SRC" ./build/flutter-build-stamp.txt
-      fi
+      mkdir -p "$MAC_OUT_DIR/BGDesk.app/Contents/Resources"
+      cp "$STAMP_SRC" "$MAC_OUT_DIR/BGDesk.app/Contents/Resources/flutter-build-stamp.txt"
+      cp "$STAMP_SRC" "$MAC_OUT_DIR/flutter-build-stamp.txt"
     fi
     local ZIP_NAME
     if [[ "$BGDESK_CLIENTE" == "1" ]]; then
@@ -379,12 +368,15 @@ buildMac()
       ZIP_NAME="bgdesk-suporte-darwin.zip"
     fi
     (
-      cd build
+      cd "$MAC_OUT_DIR"
       zip -vr "$ZIP_NAME" BGDesk.app
     )
     echo ""
+    echo "=== Build macOS concluído ==="
+    echo "Pasta: $ROOT/$MAC_OUT_DIR/"
+    echo ""
     echo "=== Flutter usado neste build ==="
-    cat build/flutter-build-stamp.txt 2>/dev/null || true
+    cat "$MAC_OUT_DIR/flutter-build-stamp.txt" 2>/dev/null || true
 }
 
 buildLinux_x86_64()
@@ -471,12 +463,17 @@ buildAndroid()
 
     cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/
     cp "./target/$TARGET/release/liblibrustdesk.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
+    local ANDROID_OUT_DIR
+    ANDROID_OUT_DIR="$(bgdesk_build_out_dir android aarch64)"
+    bgdesk_prepare_build_out_dir "$ANDROID_OUT_DIR"
     pushd flutter >/dev/null
     flutter build apk "--release" --target-platform android-arm64 --split-per-abi
-    mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ../bgdesk.apk
+    cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../${ANDROID_OUT_DIR}/bgdesk.apk"
     popd >/dev/null
-    mkdir -p signed-apk
-    mv bgdesk.apk signed-apk/
+    echo ""
+    echo "=== Build Android concluído ==="
+    echo "Pasta: $ROOT/$ANDROID_OUT_DIR/"
+    ls -la "$ANDROID_OUT_DIR/bgdesk.apk" 2>/dev/null || true
 }
 
 # ./build.sh --build-bridges — só regenera o bridge (sem build de plataforma)

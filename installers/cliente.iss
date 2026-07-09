@@ -9,11 +9,14 @@ AppPublisher=Thinksoft
 AppPublisherURL=boagestao.com.br/bgdesk
 AppSupportURL=boagestao.com.br/bgdesk
 AppUpdatesURL=boagestao.com.br/bgdesk
+#ifndef BuildOutSubdir
+  #define BuildOutSubdir "windows-x86_64-cliente"
+#endif
 DefaultDirName={commonpf}\BGDesk
 UninstallDisplayIcon={app}\bgdesk.exe
 DefaultGroupName=BGDesk
 DisableProgramGroupPage=yes
-OutputDir=..\build
+OutputDir=..\build\{#BuildOutSubdir}
 OutputBaseFilename=bgdesk-cliente-win64
 PrivilegesRequired=admin
 Compression=lzma                         
@@ -37,7 +40,7 @@ end;
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Files]
-Source: "..\build\windows-cliente\*"; DestDir: "{app}"; BeforeInstall: TaskKill('bgdesk.exe'); Flags: ignoreversion recursesubdirs createallsubdirs 
+Source: "..\build\{#BuildOutSubdir}\*"; DestDir: "{app}"; BeforeInstall: TaskKill('bgdesk.exe'); Flags: ignoreversion recursesubdirs createallsubdirs 
 Source: "..\config\certs\ca.crt"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
              
 [INI]

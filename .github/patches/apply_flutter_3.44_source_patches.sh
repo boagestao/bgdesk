@@ -3,7 +3,7 @@
 #
 # Windows arm64 needs Flutter >= 3.44 (the first stable release shipping an arm64 Dart SDK +
 # engine), which renamed DialogTheme/TabBarTheme -> *Data and needs newer extended_text/
-# google_fonts. macOS manual builds (./build.sh) use Flutter master from GitHub and need the
+# google_fonts. macOS manual builds (./build.sh) use Flutter stable 3.44.6 and need the
 # same renames. Every other platform is still on Flutter 3.24.5, where the old names/versions
 # are required, so these changes are kept OUT of the committed sources and applied here instead.
 #

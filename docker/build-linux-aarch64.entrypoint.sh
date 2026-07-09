@@ -5,6 +5,9 @@ set -euo pipefail
 
 cd /root/bgdesk
 
+# shellcheck source=scripts/build-out-dir.sh
+source /root/bgdesk/scripts/build-out-dir.sh
+
 VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 BUILD_BRIDGES="${BUILD_BRIDGES:-0}"
@@ -21,6 +24,7 @@ export VCPKG_TRIPLET="${VCPKG_TRIPLET:-arm64-linux}"
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
 export PUB_CACHE="${PUB_CACHE:-/root/.pub-cache}"
 export PATH="/opt/flutter-elinux/bin:/opt/flutter-elinux/flutter/bin:/root/.cargo/bin:${PATH}"
+BGDESK_BUILD_OUT_DIR="${BGDESK_BUILD_OUT_DIR:-$(bgdesk_build_out_dir linux "${ARCH_SUFFIX}")}"
 
 log() { echo "[build-linux-aarch64] $*"; }
 
@@ -59,7 +63,7 @@ clean_for_force_rebuild() {
   rm -rf target/release
   rm -rf flutter/build/linux flutter/.dart_tool
   rm -f bgdesk-*.deb bgdesk-*-aarch64.deb bgdesk-*.rpm bgdesk-*-aarch64.rpm
-  rm -f appimage/*.AppImage build/*.deb build/*.AppImage build/*.rpm
+  rm -f appimage/*.AppImage "${BGDESK_BUILD_OUT_DIR}"/*.deb "${BGDESK_BUILD_OUT_DIR}"/*.AppImage "${BGDESK_BUILD_OUT_DIR}"/*.rpm
   rm -f appimage/*.zst appimage/debian-binary appimage/bgdesk.deb \
     appimage/control.tar.* appimage/data.tar.* ./*.zst 2>/dev/null || true
 }
@@ -127,10 +131,10 @@ build_deb() {
     py_args+=(--incoming-only)
   fi
   if [[ "${FORCE_REBUILD}" != "1" ]] && \
-     { [[ -f "${out}" ]] || [[ -f "build/${out}" ]]; }; then
+     { [[ -f "${out}" ]] || [[ -f "${BGDESK_BUILD_OUT_DIR}/${out}" ]]; }; then
     log "${out} already exists, skipping deb build (use --force to rebuild)"
-    if [[ ! -f "${out}" && -f "build/${out}" ]]; then
-      cp -f "build/${out}" "${out}"
+    if [[ ! -f "${out}" && -f "${BGDESK_BUILD_OUT_DIR}/${out}" ]]; then
+      cp -f "${BGDESK_BUILD_OUT_DIR}/${out}" "${out}"
     fi
     return
   fi
@@ -153,10 +157,10 @@ build_deb() {
 build_rpm() {
   local rpm_out="${PKG_NAME}-${ARCH_SUFFIX}.rpm"
   if [[ "${FORCE_REBUILD}" != "1" ]] && \
-     { [[ -f "${rpm_out}" ]] || [[ -f "build/${rpm_out}" ]]; }; then
+     { [[ -f "${rpm_out}" ]] || [[ -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" ]]; }; then
     log "${rpm_out} already exists, skipping rpm build (use --force to rebuild)"
-    if [[ ! -f "${rpm_out}" && -f "build/${rpm_out}" ]]; then
-      cp -f "build/${rpm_out}" "${rpm_out}"
+    if [[ ! -f "${rpm_out}" && -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" ]]; then
+      cp -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" "${rpm_out}"
     fi
     return
   fi
@@ -204,17 +208,17 @@ build_rpm() {
 build_appimage() {
   local deb="${PKG_NAME}-${ARCH_SUFFIX}.deb"
   local appimage_out="${PKG_NAME}-${ARCH_SUFFIX}.AppImage"
-  if [[ ! -f "${deb}" && -f "build/${deb}" ]]; then
-    cp -f "build/${deb}" "${deb}"
+  if [[ ! -f "${deb}" && -f "${BGDESK_BUILD_OUT_DIR}/${deb}" ]]; then
+    cp -f "${BGDESK_BUILD_OUT_DIR}/${deb}" "${deb}"
   fi
 
   if [[ "${FORCE_REBUILD}" != "1" ]] && \
      { [[ -f "appimage/${appimage_out}" ]] || \
-       [[ -f "build/${appimage_out}" ]]; }; then
+       [[ -f "${BGDESK_BUILD_OUT_DIR}/${appimage_out}" ]]; }; then
     log "${appimage_out} already exists, skipping (use --force to rebuild)"
-    if [[ ! -f "appimage/${appimage_out}" && -f "build/${appimage_out}" ]]; then
+    if [[ ! -f "appimage/${appimage_out}" && -f "${BGDESK_BUILD_OUT_DIR}/${appimage_out}" ]]; then
       mkdir -p appimage
-      cp -f "build/${appimage_out}" appimage/
+      cp -f "${BGDESK_BUILD_OUT_DIR}/${appimage_out}" appimage/
     fi
     return
   fi
@@ -248,31 +252,31 @@ build_appimage() {
 }
 
 collect_artifacts() {
-  log "moving artifacts to build/ and cleaning intermediates..."
-  mkdir -p build
+  log "moving artifacts to ${BGDESK_BUILD_OUT_DIR}/ and cleaning intermediates..."
+  mkdir -p "${BGDESK_BUILD_OUT_DIR}"
 
   shopt -s nullglob
   local deb="${PKG_NAME}-${ARCH_SUFFIX}.deb"
   if [[ -f "${deb}" ]]; then
-    mv -f "${deb}" build/
+    mv -f "${deb}" "${BGDESK_BUILD_OUT_DIR}/"
   fi
 
   local rpm="${PKG_NAME}-${ARCH_SUFFIX}.rpm"
   if [[ -f "${rpm}" ]]; then
-    mv -f "${rpm}" build/
+    mv -f "${rpm}" "${BGDESK_BUILD_OUT_DIR}/"
   fi
 
   local appimage_out="${PKG_NAME}-${ARCH_SUFFIX}.AppImage"
   if [[ -f "appimage/${appimage_out}" ]]; then
-    mv -f "appimage/${appimage_out}" build/
+    mv -f "appimage/${appimage_out}" "${BGDESK_BUILD_OUT_DIR}/"
   fi
 
   rm -f appimage/*.zst appimage/debian-binary appimage/bgdesk.deb \
     appimage/control.tar.* appimage/data.tar.* 2>/dev/null || true
   rm -f ./*.zst 2>/dev/null || true
 
-  log "done — artifacts in build/:"
-  ls -lh build/*.deb build/*.rpm build/*.AppImage 2>/dev/null || true
+  log "done — artifacts in ${BGDESK_BUILD_OUT_DIR}/:"
+  ls -lh "${BGDESK_BUILD_OUT_DIR}"/*.deb "${BGDESK_BUILD_OUT_DIR}"/*.rpm "${BGDESK_BUILD_OUT_DIR}"/*.AppImage 2>/dev/null || true
 }
 
 log "BGDesk Linux aarch64 compile starting (version ${VERSION}, FORCE_REBUILD=${FORCE_REBUILD}, BGDESK_CLIENTE=${BGDESK_CLIENTE})"
