@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# DEPRECATED: builds macOS usam scripts/setup-flutter-macos.sh (Flutter stable 3.44.6).
-# Mantido apenas para referência / engine local manual.
-#
 # Flutter SDK a partir do branch master do GitHub (não usa release estável).
 # Uso exclusivo: build manual macOS via ./build.sh (CI usa Flutter stable 3.24.5).
 #
