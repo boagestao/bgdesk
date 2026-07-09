@@ -37,7 +37,6 @@ fn gen_bgdesk_config() {
     let settings: toml::Table = content.parse().expect("invalid config/settings.toml");
 
     let is_debug = std::env::var("PROFILE").unwrap_or_default() == "debug";
-    let incoming_only = std::env::var("CARGO_FEATURE_INCOMING_ONLY").is_ok();
 
     let mut rendezvous_server = required_string(&settings, "rendezvous_server");
     if is_debug {
@@ -45,13 +44,7 @@ fn gen_bgdesk_config() {
     }
     let api_server = required_string(&settings, "api_server");
     let version_check_url = required_string(&settings, "version_check_url");
-    let rs_pub_key_cliente = required_string(&settings, "rs_pub_key");
-    let rs_pub_key_suporte = required_string(&settings, "rs_pub_key_suporte");
-    let rs_pub_key = if incoming_only {
-        rs_pub_key_cliente.clone()
-    } else {
-        rs_pub_key_suporte.clone()
-    };
+    let rs_pub_key = required_string(&settings, "rs_pub_key");
     let link_docs_home = required_string(&settings, "link_docs_home");
     let link_docs_x11_required = required_string(&settings, "link_docs_x11_required");
     let link_headless_linux_support = required_string(&settings, "link_headless_linux_support");
@@ -72,18 +65,6 @@ fn gen_bgdesk_config() {
         file,
         "pub const RENDEZVOUS_SERVERS: &[&str] = &[\"{}\"];",
         escape(&rendezvous_server)
-    )
-    .unwrap();
-    writeln!(
-        file,
-        "pub const RS_PUB_KEY_CLIENTE: &str = \"{}\";",
-        escape(&rs_pub_key_cliente)
-    )
-    .unwrap();
-    writeln!(
-        file,
-        "pub const RS_PUB_KEY_SUPORTE: &str = \"{}\";",
-        escape(&rs_pub_key_suporte)
     )
     .unwrap();
     writeln!(
@@ -122,14 +103,7 @@ fn gen_bgdesk_config() {
         escape(link_headless_linux_support)
     )
     .unwrap();
-    write_default_settings_fn(
-        &mut file,
-        defaults,
-        &rs_pub_key_cliente,
-        &rs_pub_key_suporte,
-        incoming_only,
-        is_debug,
-    )
+    write_default_settings_fn(&mut file, defaults, &rs_pub_key, is_debug)
     .unwrap();
     write_hashmap_fn(&mut file, "bgdesk_hard_settings", hard).unwrap();
     write_hashmap_fn(&mut file, "bgdesk_builtin_settings", builtin).unwrap();
@@ -160,22 +134,13 @@ fn escape(value: impl AsRef<str>) -> String {
 fn write_default_settings_fn(
     file: &mut std::fs::File,
     table: &toml::Table,
-    rs_pub_key_cliente: &str,
-    rs_pub_key_suporte: &str,
-    incoming_only: bool,
+    rs_pub_key: &str,
     is_debug: bool,
 ) -> std::io::Result<()> {
-    let default_key = if incoming_only {
-        rs_pub_key_cliente
-    } else {
-        rs_pub_key_suporte
-    };
+    let default_key = rs_pub_key;
     let mut entries: Vec<(String, String)> = table
         .iter()
         .filter_map(|(key, value)| {
-            if key == "key_suporte" {
-                return None;
-            }
             let value = value.as_str().unwrap_or_else(|| {
                 panic!("config/settings.toml: `[defaults]` key `{key}` must be a string")
             });
