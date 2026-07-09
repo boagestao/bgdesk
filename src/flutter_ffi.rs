@@ -954,11 +954,14 @@ pub fn main_get_http_status(url: String) -> Option<String> {
 }
 
 pub fn main_get_option(key: String) -> String {
+    if config::is_server_secret_option(&key) {
+        return "".to_owned();
+    }
     get_option(key)
 }
 
 pub fn main_get_option_sync(key: String) -> SyncReturn<String> {
-    SyncReturn(get_option(key))
+    SyncReturn(main_get_option(key))
 }
 
 pub fn main_get_error() -> String {
@@ -974,6 +977,9 @@ pub fn main_show_option(_key: String) -> SyncReturn<bool> {
 }
 
 pub fn main_set_option(key: String, value: String) {
+    if config::is_server_secret_option(&key) {
+        return;
+    }
     #[cfg(target_os = "android")]
     {
         let is_permission_option = key.eq(config::keys::OPTION_ENABLE_CLIPBOARD)
@@ -1065,6 +1071,7 @@ pub fn main_set_options(json: String) {
             }
         }
     }
+    config::strip_server_secret_options(&mut map);
     if !map.is_empty() {
         set_options(map)
     }

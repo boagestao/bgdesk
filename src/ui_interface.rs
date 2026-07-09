@@ -75,7 +75,7 @@ lazy_static::lazy_static! {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 lazy_static::lazy_static! {
     static ref OPTION_SYNCED: Arc<Mutex<bool>> = Default::default();
-    static ref OPTIONS : Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(Config::get_options()));
+    static ref OPTIONS : Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(Config::get_public_options()));
     pub static ref SENDER : Mutex<mpsc::UnboundedSender<ipc::Data>> = Mutex::new(check_connect_status(true));
     static ref CHILDREN : Children = Default::default();
 }
@@ -155,7 +155,7 @@ pub fn get_license() -> String {
 pub fn refresh_options() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        *OPTIONS.lock().unwrap() = Config::get_options();
+        *OPTIONS.lock().unwrap() = Config::get_public_options();
     }
 }
 
@@ -163,6 +163,9 @@ pub fn refresh_options() {
 pub fn get_option<T: AsRef<str>>(key: T) -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
+        if config::is_server_secret_option(key.as_ref()) {
+            return "".to_owned();
+        }
         let map = OPTIONS.lock().unwrap();
         if let Some(v) = map.get(key.as_ref()) {
             v.to_owned()
@@ -172,7 +175,11 @@ pub fn get_option<T: AsRef<str>>(key: T) -> String {
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        Config::get_option(key.as_ref())
+        if config::is_server_secret_option(key.as_ref()) {
+            "".to_owned()
+        } else {
+            Config::get_option(key.as_ref())
+        }
     }
 }
 
@@ -342,7 +349,7 @@ pub fn get_options() -> String {
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            Config::get_options()
+            Config::get_public_options()
         }
     };
     let mut m = serde_json::Map::new();
@@ -408,7 +415,8 @@ pub fn get_sound_inputs() -> Vec<String> {
 }
 
 #[inline]
-pub fn set_options(m: HashMap<String, String>) {
+pub fn set_options(mut m: HashMap<String, String>) {
+    config::strip_server_secret_options(&mut m);
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         *OPTIONS.lock().unwrap() = m.clone();
@@ -420,6 +428,9 @@ pub fn set_options(m: HashMap<String, String>) {
 
 #[inline]
 pub fn set_option(key: String, value: String) {
+    if config::is_server_secret_option(&key) {
+        return;
+    }
     if &key == "stop-service" {
         #[cfg(target_os = "macos")]
         {

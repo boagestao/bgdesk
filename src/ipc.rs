@@ -847,13 +847,21 @@ async fn handle(data: Data, stream: &mut Connection) {
                 } else if name == "salt" {
                     value = Some(Config::get_salt());
                 } else if name == "rendezvous_server" {
-                    value = Some(format!(
-                        "{},{}",
-                        Config::get_rendezvous_server(),
-                        Config::get_rendezvous_servers().join(",")
-                    ));
+                    if config::is_incoming_only() {
+                        value = None;
+                    } else {
+                        value = Some(format!(
+                            "{},{}",
+                            Config::get_rendezvous_server(),
+                            Config::get_rendezvous_servers().join(",")
+                        ));
+                    }
                 } else if name == "rendezvous_servers" {
-                    value = Some(Config::get_rendezvous_servers().join(","));
+                    if config::is_incoming_only() {
+                        value = None;
+                    } else {
+                        value = Some(Config::get_rendezvous_servers().join(","));
+                    }
                 } else if name == "fingerprint" {
                     value = if Config::get_key_confirmed() {
                         Some(crate::common::pk_to_fingerprint(Config::get_key_pair().1))
@@ -913,7 +921,7 @@ async fn handle(data: Data, stream: &mut Connection) {
         },
         Data::Options(value) => match value {
             None => {
-                let v = Config::get_options();
+                let v = Config::get_public_options();
                 allow_err!(stream.send(&Data::Options(Some(v))).await);
             }
             Some(value) => {
@@ -941,7 +949,7 @@ async fn handle(data: Data, stream: &mut Connection) {
             allow_err!(
                 stream
                     .send(&Data::SyncConfig(Some(
-                        (Config::get(), Config2::get()).into()
+                        (Config::get(), Config2::get_public()).into()
                     )))
                     .await
             );
@@ -1723,14 +1731,16 @@ async fn get_options_(ms_timeout: u64) -> ResultType<HashMap<String, String>> {
     c.send(&Data::Options(None)).await?;
     if let Some(Data::Options(Some(value))) = c.next_timeout(ms_timeout).await? {
         Config::set_options(value.clone());
-        Ok(value)
+        Ok(Config::get_public_options())
     } else {
-        Ok(Config::get_options())
+        Ok(Config::get_public_options())
     }
 }
 
 pub async fn get_options_async() -> HashMap<String, String> {
-    get_options_(1000).await.unwrap_or(Config::get_options())
+    get_options_(1000)
+        .await
+        .unwrap_or_else(|_| Config::get_public_options())
 }
 
 #[tokio::main(flavor = "current_thread")]
