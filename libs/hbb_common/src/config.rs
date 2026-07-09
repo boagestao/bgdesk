@@ -70,7 +70,6 @@ lazy_static::lazy_static! {
     static ref TRUSTED_DEVICES: RwLock<(Vec<TrustedDevice>, bool)> = Default::default();
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
-    pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
     pub static ref APP_NAME: RwLock<String> = RwLock::new("BGDesk".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
@@ -501,7 +500,7 @@ impl Config2 {
             decrypt_str_or_original(&config.unlock_pin, PASSWORD_ENC_VERSION);
         config.unlock_pin = unlock_pin;
         store |= store2;
-        if is_incoming_only() {
+        {
             let mut changed = false;
             if !config.rendezvous_server.is_empty() {
                 config.rendezvous_server.clear();
@@ -528,10 +527,8 @@ impl Config2 {
 
     fn store(&self) {
         let mut config = self.clone();
-        if is_incoming_only() {
-            config.rendezvous_server.clear();
-            strip_server_secret_options(&mut config.options);
-        }
+        config.rendezvous_server.clear();
+        strip_server_secret_options(&mut config.options);
         let stored = Config::load_::<Config2>("2");
         if let Some(mut socks) = config.socks {
             let stored_password = stored
@@ -552,13 +549,11 @@ impl Config2 {
         return CONFIG2.read().unwrap().clone();
     }
 
-    /// Config2 safe to expose to UI/IPC. On incoming-only builds, server secrets are stripped.
+    /// Config2 safe to expose to UI/IPC. Server secrets are stripped.
     pub fn get_public() -> Config2 {
         let mut c = Self::get();
-        if is_incoming_only() {
-            c.rendezvous_server.clear();
-            strip_server_secret_options(&mut c.options);
-        }
+        c.rendezvous_server.clear();
+        strip_server_secret_options(&mut c.options);
         c
     }
 
@@ -937,16 +932,7 @@ impl Config {
     }
 
     pub fn get_rendezvous_server() -> String {
-        let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_option("custom-rendezvous-server");
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = CONFIG2.read().unwrap().rendezvous_server.clone();
-        }
+        let mut rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
         if rendezvous_server.is_empty() {
             rendezvous_server = Self::get_rendezvous_servers()
                 .drain(..)
@@ -960,28 +946,9 @@ impl Config {
     }
 
     pub fn get_rendezvous_servers() -> Vec<String> {
-        let s = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if !s.is_empty() {
-            return vec![s];
-        }
-        let s = Self::get_option("custom-rendezvous-server");
-        if !s.is_empty() {
-            return vec![s];
-        }
         let s = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
         if !s.is_empty() {
             return vec![s];
-        }
-        let serial_obsolute = CONFIG2.read().unwrap().serial > SERIAL;
-        if serial_obsolute {
-            let ss: Vec<String> = Self::get_option("rendezvous-servers")
-                .split(',')
-                .filter(|x| x.contains('.'))
-                .map(|x| x.to_owned())
-                .collect();
-            if !ss.is_empty() {
-                return ss;
-            }
         }
         return RENDEZVOUS_SERVERS.iter().map(|x| x.to_string()).collect();
     }
@@ -1000,14 +967,9 @@ impl Config {
                 host = tmp_host.to_string();
             }
         }
-        if !host.is_empty() && !is_incoming_only() {
-            let mut config = CONFIG2.write().unwrap();
-            if host != config.rendezvous_server {
-                log::debug!("Update rendezvous_server in config to {}", host);
-                log::debug!("{:?}", *ONLINE.lock().unwrap());
-                config.rendezvous_server = host;
-                config.store();
-            }
+        if !host.is_empty() {
+            log::debug!("Best rendezvous server latency: {}ms ({})", delay, host);
+            log::debug!("{:?}", *ONLINE.lock().unwrap());
         }
     }
 
@@ -1253,12 +1215,10 @@ impl Config {
         res
     }
 
-    /// Options safe to expose to UI/IPC. On incoming-only builds, server secrets are stripped.
+    /// Options safe to expose to UI/IPC. Server secrets are stripped.
     pub fn get_public_options() -> HashMap<String, String> {
         let mut res = Self::get_options();
-        if is_incoming_only() {
-            strip_server_secret_options(&mut res);
-        }
+        strip_server_secret_options(&mut res);
         res
     }
 
@@ -1278,6 +1238,15 @@ impl Config {
     }
 
     pub fn get_option(k: &str) -> String {
+        if is_server_secret_option(k) {
+            return get_or(
+                &OVERWRITE_SETTINGS,
+                &HashMap::new(),
+                &DEFAULT_SETTINGS,
+                k,
+            )
+            .unwrap_or_default();
+        }
         get_or(
             &OVERWRITE_SETTINGS,
             &CONFIG2.read().unwrap().options,
@@ -2814,11 +2783,16 @@ fn is_option_can_save(
     true
 }
 
-const SERVER_SECRET_OPTIONS: &[&str] = &["api-server", "key", "custom-rendezvous-server"];
+const SERVER_SECRET_OPTIONS: &[&str] = &[
+    "api-server",
+    "key",
+    "custom-rendezvous-server",
+    "rendezvous-servers",
+];
 
 #[inline]
 pub fn is_server_secret_option(k: &str) -> bool {
-    is_incoming_only() && SERVER_SECRET_OPTIONS.contains(&k)
+    SERVER_SECRET_OPTIONS.contains(&k)
 }
 
 #[inline]
@@ -4075,12 +4049,8 @@ mod tests {
     }
 
     #[test]
-    fn test_incoming_only_hides_server_secrets() {
+    fn test_server_secrets_not_read_from_user_config() {
         let _guard = ConfigStateTestGuard::new(Config::get(), HARD_SETTINGS.read().unwrap().clone());
-        HARD_SETTINGS
-            .write()
-            .unwrap()
-            .insert("conn-type".to_string(), "incoming".to_string());
         DEFAULT_SETTINGS.write().unwrap().insert(
             "api-server".to_string(),
             "https://secret.example".to_string(),
@@ -4097,11 +4067,22 @@ mod tests {
             "api-server".to_string(),
             "https://override.example".to_string(),
         );
+        CONFIG2.write().unwrap().options.insert(
+            "key".to_string(),
+            "override-key".to_string(),
+        );
+        CONFIG2.write().unwrap().options.insert(
+            "custom-rendezvous-server".to_string(),
+            "override.example".to_string(),
+        );
         CONFIG2.write().unwrap().rendezvous_server = "secret.example:21116".to_string();
 
         assert!(is_server_secret_option("api-server"));
         assert!(is_server_secret_option("key"));
         assert!(!is_server_secret_option("direct-server"));
+
+        assert_eq!(Config::get_option("key"), "secret-key");
+        assert_eq!(Config::get_option("custom-rendezvous-server"), "secret.example");
 
         let public = Config::get_public_options();
         assert!(!public.contains_key("api-server"));
