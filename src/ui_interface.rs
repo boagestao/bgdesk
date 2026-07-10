@@ -1585,7 +1585,7 @@ async fn check_id(
             return UNKNOWN_ERROR;
         }
     } else {
-        return "Failed to connect to rendezvous server";
+        return "connection_failed_check_internet";
     }
     ""
 }

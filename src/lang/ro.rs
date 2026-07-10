@@ -136,6 +136,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("ID does not exist", "ID neexistent"),
         ("Failed to connect to rendezvous server", "Conectare la server rendezvous eșuată"),
         ("Please try later", "Încearcă mai târziu"),
+        ("connection_failed_check_internet", "Conexiunea a eșuat. Verifică conexiunea la internet și încearcă din nou."),
         ("Remote desktop is offline", "Desktopul la distanță este offline"),
         ("Key mismatch", "Nepotrivire cheie"),
         ("Timeout", "Conexiune expirată"),

@@ -136,6 +136,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("ID does not exist", "Az azonosító nem létezik"),
         ("Failed to connect to rendezvous server", "Nem sikerült kapcsolódni a kiszolgálóhoz"),
         ("Please try later", "Próbálja meg később"),
+        ("connection_failed_check_internet", "A kapcsolódás sikertelen. Ellenőrizze az internetkapcsolatot, majd próbálja újra."),
         ("Remote desktop is offline", "A távoli számítógép offline állapotban van"),
         ("Key mismatch", "Kulcseltérés"),
         ("Timeout", "Időtúllépés"),

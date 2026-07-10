@@ -107,7 +107,7 @@ impl FramedStream {
                 }
             }
         }
-        bail!(format!("Failed to connect to {remote_addr}"));
+        bail!("Failed to connect to server");
     }
 
     pub async fn connect<'t, T>(

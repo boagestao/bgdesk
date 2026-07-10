@@ -136,6 +136,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("ID does not exist", "ID neexistuje"),
         ("Failed to connect to rendezvous server", "Nepodarilo sa pripojiť k zoznamovaciemu serveru"),
         ("Please try later", "Vyskúšajte neskôr"),
+        ("connection_failed_check_internet", "Pripojenie zlyhalo. Skontrolujte internetové pripojenie a skúste to znova."),
         ("Remote desktop is offline", "Vzdialená plocha nie je pripojená"),
         ("Key mismatch", "Kľúče sa nezhodujú"),
         ("Timeout", "Čas pre nadviazanie pripojenia vypršal"),

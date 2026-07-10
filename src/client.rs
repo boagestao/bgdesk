@@ -213,7 +213,7 @@ impl Client {
             Err(err) => {
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {
-                    bail!(err_str + ": Please try later");
+                    bail!("connection_failed_check_internet");
                 } else {
                     return Err(err);
                 }

@@ -136,6 +136,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("ID does not exist", "المعرف غير موجود"),
         ("Failed to connect to rendezvous server", "فشل الاتصال بخادم rendezvous"),
         ("Please try later", "الرجاء المحاولة لاحقا"),
+        ("connection_failed_check_internet", "فشل الاتصال. يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى."),
         ("Remote desktop is offline", "سطح المكتب البعيد غير متصل"),
         ("Key mismatch", "المفتاح غير متطابق"),
         ("Timeout", "نفذ الوقت"),
