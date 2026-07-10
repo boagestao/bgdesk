@@ -24,26 +24,8 @@ win_user_home() {
   fi
 }
 
-ensure_rust_version() {
-  local min_major=1 min_minor=85
-  local ver major minor
-  ver="$(rustc --version 2>/dev/null | awk '{print $2}')"
-  major="${ver%%.*}"
-  minor="${ver#*.}"
-  minor="${minor%%.*}"
-  if [[ -z "$major" || -z "$minor" ]] \
-    || (( major < min_major )) \
-    || (( major == min_major && minor < min_minor )); then
-    echo "[build] ERRO: Rust $min_major.$min_minor+ é necessário (atual: ${ver:-desconhecido})."
-    echo "[build] O projeto usa rust-toolchain.toml — rode: rustup toolchain install 1.85 && rustup default 1.85"
-    echo "[build] Ou instale/atualize em: https://rustup.rs"
-    exit 1
-  fi
-}
-
 ensure_cargo() {
   if command -v cargo >/dev/null 2>&1; then
-    ensure_rust_version
     return 0
   fi
   local win_home="${WIN_HOME:-$(win_user_home)}"
@@ -52,15 +34,11 @@ ensure_cargo() {
     if [[ -f "$env_file" ]]; then
       # shellcheck source=/dev/null
       . "$env_file"
-      if command -v cargo >/dev/null 2>&1; then
-        ensure_rust_version
-        return 0
-      fi
+      command -v cargo >/dev/null 2>&1 && return 0
     fi
   done
   if [[ -x "$win_home/.cargo/bin/cargo.exe" ]]; then
     export PATH="$win_home/.cargo/bin:$PATH"
-    ensure_rust_version
     return 0
   fi
   if ! command -v cargo >/dev/null 2>&1; then
@@ -69,7 +47,6 @@ ensure_cargo() {
     echo "[build] Ou rode: ./scripts/setup-windows-build.sh"
     exit 1
   fi
-  ensure_rust_version
 }
 
 usage() {

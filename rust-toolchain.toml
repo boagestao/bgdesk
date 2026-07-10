@@ -1,4 +1,0 @@
-[toolchain]
-# time-core 0.1.9 (via time 0.3.53 no Cargo.lock) requer edition2024 (Rust >= 1.85).
-channel = "1.85"
-components = ["rustfmt", "clippy"]
