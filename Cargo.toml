@@ -77,6 +77,8 @@ crossbeam-queue = "0.3"
 hex = "0.4"
 chrono = "0.4"
 jsonwebtoken = "9"
+# simple_asn1 >= 0.6.4 puxa time >= 0.3.47 (time-core 0.1.9 / Rust 1.85+).
+simple_asn1 = "=0.6.2"
 cidr-utils = "0.5"
 fon = "0.6"
 zip = "0.6"
