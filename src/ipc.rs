@@ -1596,6 +1596,13 @@ pub fn get_fingerprint() -> String {
         .unwrap_or_default()
 }
 
+pub async fn get_fingerprint_async() -> String {
+    match get_config_async("fingerprint", 1_000).await {
+        Ok(Some(v)) => v,
+        _ => String::new(),
+    }
+}
+
 pub fn set_permanent_password(v: String) -> ResultType<()> {
     if Config::is_disable_change_permanent_password() {
         bail!("Changing permanent password is disabled");

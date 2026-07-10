@@ -44,6 +44,8 @@ fn gen_bgdesk_config() {
     }
     let api_server = required_string(&settings, "api_server");
     let version_check_url = required_string(&settings, "version_check_url");
+    let license_server_url = required_string(&settings, "license_server_url");
+    let license_jwt_password = required_string(&settings, "license_jwt_passowrd");
     let rs_pub_key = required_string(&settings, "rs_pub_key");
     let link_docs_home = required_string(&settings, "link_docs_home");
     let link_docs_x11_required = required_string(&settings, "link_docs_x11_required");
@@ -85,6 +87,13 @@ fn gen_bgdesk_config() {
         escape(version_check_url)
     )
     .unwrap();
+    writeln!(
+        file,
+        "pub const LICENSE_SERVER_URL: &str = \"{}\";",
+        escape(license_server_url)
+    )
+    .unwrap();
+    write_obfuscated_license_jwt_secret(&mut file, &license_jwt_password).unwrap();
     writeln!(
         file,
         "pub const LINK_DOCS_HOME: &str = \"{}\";",
@@ -129,6 +138,68 @@ fn escape(value: impl AsRef<str>) -> String {
         .as_ref()
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+}
+
+/// XOR-obfuscate the JWT secret so it does not appear as plaintext in the binary.
+fn obfuscate_license_jwt_secret(secret: &str) -> (Vec<u8>, [u8; 4]) {
+    const SEED: [u8; 4] = [0xB7, 0x4D, 0xE2, 0x91];
+    let obfuscated = secret
+        .bytes()
+        .enumerate()
+        .map(|(i, b)| b ^ SEED[i % SEED.len()] ^ (i as u8).wrapping_mul(0x17))
+        .collect();
+    (obfuscated, SEED)
+}
+
+fn write_obfuscated_license_jwt_secret(
+    file: &mut std::fs::File,
+    secret: &str,
+) -> std::io::Result<()> {
+    let (obfuscated, seed) = obfuscate_license_jwt_secret(secret);
+    writeln!(
+        file,
+        "const LICENSE_JWT_SECRET_OBF: &[u8] = &{:?};",
+        obfuscated
+    )?;
+    writeln!(
+        file,
+        "const LICENSE_JWT_SECRET_OBF_SEED: [u8; 4] = {:?};",
+        seed
+    )?;
+    writeln!(
+        file,
+        "pub fn license_jwt_secret() -> String {{"
+    )?;
+    writeln!(
+        file,
+        "    String::from_utf8("
+    )?;
+    writeln!(
+        file,
+        "        LICENSE_JWT_SECRET_OBF"
+    )?;
+    writeln!(
+        file,
+        "            .iter()"
+    )?;
+    writeln!(
+        file,
+        "            .enumerate()"
+    )?;
+    writeln!(
+        file,
+        "            .map(|(i, &b)| b ^ LICENSE_JWT_SECRET_OBF_SEED[i % LICENSE_JWT_SECRET_OBF_SEED.len()] ^ (i as u8).wrapping_mul(0x17))"
+    )?;
+    writeln!(
+        file,
+        "            .collect(),"
+    )?;
+    writeln!(
+        file,
+        "    ).unwrap_or_default()"
+    )?;
+    writeln!(file, "}}")?;
+    Ok(())
 }
 
 fn write_default_settings_fn(

@@ -35,6 +35,15 @@ load_windows_build_env() {
   export VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-windows-static}"
   export VCPKG_DEFAULT_HOST_TRIPLET="${VCPKG_DEFAULT_HOST_TRIPLET:-$VCPKG_TRIPLET}"
 
+  if [[ -n "${VCPKG_ROOT:-}" ]]; then
+    local llvm_root="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6"
+    local llvm_bin="$llvm_root/bin"
+    if [[ -f "$llvm_bin/libclang.dll" ]]; then
+      export LIBCLANG_PATH="$llvm_bin"
+      export BGDESK_LLVM_ROOT="$llvm_root"
+    fi
+  fi
+
   if [[ -z "${FLUTTER_ROOT:-}" ]]; then
     local candidate
     for candidate in \

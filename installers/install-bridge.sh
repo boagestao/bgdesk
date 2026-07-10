@@ -1,5 +1,11 @@
 # RUN THIS SCRIPT ON WINDOWS USING GIT-BASH
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
+  # shellcheck source=/dev/null
+  source "$ROOT/scripts/windows-build-env.sh"
+fi
+
 OS=$(uname -s)
 ARCH=$(uname -m)
 
@@ -11,7 +17,8 @@ FLUTTER_VERSION="3.22.3"
 FLUTTER_RUST_BRIDGE_VERSION="1.80.1"
 RUST_VERSION="1.75"
 
-WINDOWS_LLVM_PATH=/c/LLVM
+WINDOWS_LLVM_ROOT="${BGDESK_LLVM_ROOT:-${VCPKG_ROOT:-$HOME/.bin/vcpkg}/downloads/tools/clang/clang-15.0.6}"
+WINDOWS_LLVM_PATH="$WINDOWS_LLVM_ROOT"
 
 mkdir -p .temp
 

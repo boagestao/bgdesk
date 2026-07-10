@@ -255,6 +255,7 @@ impl Client {
         if config::is_incoming_only() {
             bail!("Incoming only mode");
         }
+        crate::license::ensure_license_valid().await?;
         // to-do: remember the port for each peer, so that we can retry easier
         if hbb_common::is_ip_str(peer) {
             return Ok((

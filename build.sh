@@ -156,12 +156,14 @@ log_flutter_for_build() {
 }
 
 generate_bridge_windows() {
-  local llvm_bin="${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6/bin"
+  local llvm_root="${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6"
+  local llvm_bin="${llvm_root}/bin"
   if [[ ! -f "$llvm_bin/libclang.dll" ]]; then
     echo "[build] ERRO: libclang não encontrado em $llvm_bin"
     echo "[build] Instale as dependências vcpkg do projeto ou defina LIBCLANG_PATH."
     exit 1
   fi
+  # bindgen usa LIBCLANG_PATH no diretório bin; ffigen usa --llvm-path na raiz do clang.
   export LIBCLANG_PATH="$llvm_bin"
   if ! command -v flutter_rust_bridge_codegen >/dev/null 2>&1; then
     echo "[build] instalando flutter_rust_bridge_codegen..."
@@ -170,7 +172,9 @@ generate_bridge_windows() {
   pushd flutter >/dev/null
   flutter pub get
   popd >/dev/null
-  flutter_rust_bridge_codegen --llvm-path "$llvm_bin" \
+  echo "[build] LIBCLANG_PATH=$LIBCLANG_PATH"
+  echo "[build] flutter_rust_bridge llvm-path=$llvm_root"
+  flutter_rust_bridge_codegen --llvm-path "$llvm_root" \
     --rust-input ./src/flutter_ffi.rs \
     --dart-output ./flutter/lib/generated_bridge.dart \
     --c-output ./flutter/macos/Runner/bridge_generated.h
@@ -221,9 +225,11 @@ setup_windows_build_env() {
   export VCPKG_DEFAULT_HOST_TRIPLET="${VCPKG_DEFAULT_HOST_TRIPLET:-x64-windows-static}"
   export VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-windows-static}"
 
-  local llvm_bin="${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6/bin"
+  local llvm_root="${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6"
+  local llvm_bin="${llvm_root}/bin"
   if [[ -f "$llvm_bin/libclang.dll" ]]; then
     export LIBCLANG_PATH="$llvm_bin"
+    export BGDESK_LLVM_ROOT="$llvm_root"
   fi
 
   if [[ -z "${FLUTTER_ROOT:-}" ]]; then

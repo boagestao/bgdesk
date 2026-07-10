@@ -762,5 +762,11 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Switch display", "Trocar de tela"),
         ("Show monitor switch button on the main toolbar", "Mostrar botão de troca de tela na barra de ferramentas"),
         ("Show on the minimized toolbar", "Mostrar na barra de ferramentas minimizada"),
+        ("License required", "Licença necessária"),
+        ("Enter your registration key to connect.", "Informe sua chave de registro para conectar."),
+        ("Registration key", "Chave de registro"),
+        ("Invalid license", "Licença inválida"),
+        ("Could not register the license. Check your internet connection and try again.", "Não foi possível registrar a licença. Verifique a conexão com a internet e tente novamente."),
+        ("Remote server error. Contact support for more information.", "Erro no servidor remoto. Procure o suporte para mais informações."),
     ].iter().cloned().collect();
 }

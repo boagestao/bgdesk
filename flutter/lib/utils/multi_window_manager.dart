@@ -4,6 +4,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/common/widgets/license_dialog.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/main.dart';
@@ -231,6 +232,9 @@ class RustDeskMultiWindowManager {
     bool? isSharedPassword,
     String? connToken,
   }) async {
+    if (!await ensureLicenseBeforeConnect()) {
+      return MultiWindowCallResult(kInvalidWindowId, null);
+    }
     var params = {
       "type": type.index,
       "id": remoteId,
@@ -354,6 +358,9 @@ class RustDeskMultiWindowManager {
     bool? forceRelay,
     String? connToken,
   }) async {
+    if (!await ensureLicenseBeforeConnect()) {
+      return MultiWindowCallResult(kInvalidWindowId, null);
+    }
     // Iterate through terminal windows in reverse order to prioritize
     // the most recently added or used windows, as they are more likely
     // to have an active session.

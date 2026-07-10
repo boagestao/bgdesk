@@ -76,6 +76,7 @@ url = { version = "2.3", features = ["serde"] }
 crossbeam-queue = "0.3"
 hex = "0.4"
 chrono = "0.4"
+jsonwebtoken = "9"
 cidr-utils = "0.5"
 fon = "0.6"
 zip = "0.6"

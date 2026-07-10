@@ -301,8 +301,10 @@ EOF
 
 write_windows_build_env_local() {
   local env_file="$ROOT/scripts/windows-build-env.local.sh"
-  local win_home
+  local win_home llvm_root llvm_bin
   win_home="$(win_home_path)"
+  llvm_root="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6"
+  llvm_bin="$llvm_root/bin"
   log "gravando $env_file ..."
   cat >"$env_file" <<EOF
 # Gerado por scripts/setup-windows-build.sh
@@ -310,14 +312,19 @@ export FLUTTER_ROOT="$FLUTTER_DIR"
 export VCPKG_ROOT="$VCPKG_ROOT"
 export VCPKG_TRIPLET="$VCPKG_TRIPLET"
 export VCPKG_DEFAULT_HOST_TRIPLET="$VCPKG_TRIPLET"
+export LIBCLANG_PATH="$llvm_bin"
+export BGDESK_LLVM_ROOT="$llvm_root"
 export PATH="$win_home/.cargo/bin:$FLUTTER_DIR/bin:\$PATH"
 EOF
 }
 
 verify_libclang() {
-  local llvm_bin="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6/bin"
+  local llvm_root="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6"
+  local llvm_bin="$llvm_root/bin"
   if [[ -f "$llvm_bin/libclang.dll" ]]; then
     log "libclang: $llvm_bin"
+    export LIBCLANG_PATH="$llvm_bin"
+    export BGDESK_LLVM_ROOT="$llvm_root"
     return 0
   fi
   die "libclang não encontrado em $llvm_bin (rode sem --skip-vcpkg-deps)"

@@ -1178,6 +1178,23 @@ pub fn main_deploy_device(token: String, id: String) -> String {
     }
 }
 
+pub fn main_validate_license(key: String) -> String {
+    match crate::license::validate_license_sync(&key) {
+        Ok(()) => {
+            crate::license::set_license_key(&key);
+            "".to_owned()
+        }
+        Err(e) => {
+            log::debug!("License validation failed: {}", e);
+            crate::lang::translate(e.message_key().to_owned())
+        }
+    }
+}
+
+pub fn main_try_validate_stored_license() -> SyncReturn<bool> {
+    SyncReturn(crate::license::try_validate_stored_license())
+}
+
 pub fn main_resolve_avatar_url(avatar: String) -> SyncReturn<String> {
     SyncReturn(resolve_avatar_url(avatar))
 }

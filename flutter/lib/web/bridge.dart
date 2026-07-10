@@ -2044,5 +2044,13 @@ class RustdeskImpl {
     throw UnimplementedError("mainDeployDevice");
   }
 
+  bool mainTryValidateStoredLicense({dynamic hint}) {
+    throw UnimplementedError("mainTryValidateStoredLicense");
+  }
+
+  Future<String> mainValidateLicense({required String key, dynamic hint}) {
+    throw UnimplementedError("mainValidateLicense");
+  }
+
   void dispose() {}
 }
