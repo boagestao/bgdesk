@@ -315,22 +315,22 @@ pub async fn ensure_license_valid() -> ResultType<()> {
     Ok(())
 }
 
-pub fn try_validate_stored_license() -> bool {
+pub fn try_validate_stored_license() -> Result<(), LicenseValidationError> {
     if config::is_incoming_only() {
-        return true;
+        return Ok(());
     }
     let stored = get_stored_license_key();
     if stored.is_empty() {
-        return false;
+        return Err(LicenseValidationError::EmptyKey);
     }
     match ensure_license_session_sync(&stored) {
-        Ok(()) => true,
+        Ok(()) => Ok(()),
         Err(e) => {
             log::info!("License validation failed: {}", e);
             if e == LicenseValidationError::InvalidLicense {
                 clear_license_key();
             }
-            false
+            Err(e)
         }
     }
 }

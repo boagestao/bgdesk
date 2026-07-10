@@ -284,6 +284,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Enter your registration key to connect.", "Enter your registration key to connect."),
         ("Registration key", "Registration key"),
         ("Invalid license", "Invalid license"),
+        ("Could not validate the license.", "Could not validate the license."),
         ("Could not register the license. Check your internet connection and try again.", "Could not register the license. Check your internet connection and try again."),
         ("Remote server error. Contact support for more information.", "Remote server error. Contact support for more information."),
     ].iter().cloned().collect();

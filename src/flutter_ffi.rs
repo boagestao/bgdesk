@@ -1191,8 +1191,14 @@ pub fn main_validate_license(key: String) -> String {
     }
 }
 
-pub fn main_try_validate_stored_license() -> SyncReturn<bool> {
-    SyncReturn(crate::license::try_validate_stored_license())
+pub fn main_try_validate_stored_license() -> SyncReturn<String> {
+    match crate::license::try_validate_stored_license() {
+        Ok(()) => SyncReturn(String::new()),
+        Err(crate::license::LicenseValidationError::InvalidLicense) => {
+            SyncReturn("invalid_license".to_owned())
+        }
+        Err(e) => SyncReturn(crate::lang::translate(e.message_key().to_owned())),
+    }
 }
 
 pub fn main_resolve_avatar_url(avatar: String) -> SyncReturn<String> {

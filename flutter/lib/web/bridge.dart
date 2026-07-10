@@ -2044,7 +2044,7 @@ class RustdeskImpl {
     throw UnimplementedError("mainDeployDevice");
   }
 
-  bool mainTryValidateStoredLicense({dynamic hint}) {
+  String mainTryValidateStoredLicense({dynamic hint}) {
     throw UnimplementedError("mainTryValidateStoredLicense");
   }
 

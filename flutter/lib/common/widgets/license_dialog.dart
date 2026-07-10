@@ -4,16 +4,38 @@ import '../../common.dart';
 import '../../models/platform_model.dart';
 
 const _licenseDialogTag = 'bgdesk-license';
+const _licenseKeyOption = 'bgdesk-license-key';
+
+Future<void> showLicenseValidationErrorPopup(String message) {
+  return gFFI.dialogManager.show((setState, close, context) {
+    return CustomAlertDialog(
+      title: Text(translate('Could not validate the license.')),
+      content: Text(message),
+      actions: [
+        dialogButton('OK', onPressed: close),
+      ],
+      onSubmit: close,
+    );
+  });
+}
 
 /// Returns true when a valid license is available (suporte edition only).
 Future<bool> ensureLicenseBeforeConnect() async {
   if (bind.isIncomingOnly()) {
     return true;
   }
-  if (bind.mainTryValidateStoredLicense()) {
+  if (bind.mainGetLocalOption(key: _licenseKeyOption).trim().isEmpty) {
+    return showLicenseDialogAndWait();
+  }
+  final status = bind.mainTryValidateStoredLicense();
+  if (status.isEmpty) {
     return true;
   }
-  return showLicenseDialogAndWait();
+  if (status == 'invalid_license') {
+    return showLicenseDialogAndWait();
+  }
+  await showLicenseValidationErrorPopup(status);
+  return false;
 }
 
 Future<bool> showLicenseDialogAndWait() async {

@@ -766,6 +766,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Enter your registration key to connect.", "Informe sua chave de registro para conectar."),
         ("Registration key", "Chave de registro"),
         ("Invalid license", "Licença inválida"),
+        ("Could not validate the license.", "Não foi possível validar a licença."),
         ("Could not register the license. Check your internet connection and try again.", "Não foi possível registrar a licença. Verifique a conexão com a internet e tente novamente."),
         ("Remote server error. Contact support for more information.", "Erro no servidor remoto. Procure o suporte para mais informações."),
     ].iter().cloned().collect();
