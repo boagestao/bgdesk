@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gera generated_bridge.dart + generated_bridge.freezed.dart + bridge Rust.
 #
-# Usa Flutter GitHub master para o codegen principal e Flutter stable 3.22
-# apenas para build_runner/freezed (Dart 3.13 do master quebra build_runner).
+# Usa Flutter GitHub master para o codegen principal e Flutter stable para
+# build_runner/freezed (precisa Dart >= 3.9 por google_fonts ^8.1.0 no pubspec).
 
 set -euo pipefail
 
@@ -21,34 +21,58 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 FLUTTER_BRIDGE_DIR="${FLUTTER_BRIDGE_DIR:-$HOME/dev/flutter-bridge-tools}"
-FLUTTER_BRIDGE_VERSION="${FLUTTER_BRIDGE_VERSION:-3.29.0}"
+FLUTTER_BRIDGE_VERSION="${FLUTTER_BRIDGE_VERSION:-3.44.4}"
+FLUTTER_BRIDGE_MIN_DART_MAJOR=3
+FLUTTER_BRIDGE_MIN_DART_MINOR=9
 
 log() { echo "[bridge] $*"; }
 
+bridge_flutter_dart_minor() {
+  local flutter_bin="$1"
+  "$flutter_bin" --version 2>/dev/null | sed -n 's/.*Dart \([0-9]*\)\.\([0-9]*\).*/\1 \2/p' | head -1
+}
+
+bridge_flutter_is_usable() {
+  local flutter_bin="$FLUTTER_BRIDGE_DIR/bin/flutter"
+  [[ -x "$flutter_bin" ]] || return 1
+  local dart_parts major minor
+  dart_parts="$(bridge_flutter_dart_minor "$flutter_bin")"
+  major="${dart_parts%% *}"
+  minor="${dart_parts##* }"
+  [[ -n "$major" && -n "$minor" ]] \
+    && (( major > FLUTTER_BRIDGE_MIN_DART_MAJOR \
+      || (major == FLUTTER_BRIDGE_MIN_DART_MAJOR && minor >= FLUTTER_BRIDGE_MIN_DART_MINOR) ))
+}
+
 setup_bridge_flutter() {
-  if [[ ! -x "$FLUTTER_BRIDGE_DIR/bin/flutter" ]]; then
-    log "baixando Flutter $FLUTTER_BRIDGE_VERSION para build_runner (apenas freezed)..."
-    mkdir -p "$(dirname "$FLUTTER_BRIDGE_DIR")"
-    local os arch archive url
-    os="$(uname -s)"
-    arch="$(uname -m)"
-    if [[ "$os" == "Darwin" ]]; then
-      archive="flutter_macos_${FLUTTER_BRIDGE_VERSION}-stable.zip"
-      url="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${archive}"
-      curl -L "$url" -o "/tmp/${archive}"
-      rm -rf "$FLUTTER_BRIDGE_DIR"
-      unzip -q "/tmp/${archive}" -d "$(dirname "$FLUTTER_BRIDGE_DIR")"
-      mv "$(dirname "$FLUTTER_BRIDGE_DIR")/flutter" "$FLUTTER_BRIDGE_DIR"
-    else
-      archive="flutter_linux_${FLUTTER_BRIDGE_VERSION}-stable.tar.xz"
-      url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/${archive}"
-      curl -L "$url" -o "/tmp/${archive}"
-      rm -rf "$FLUTTER_BRIDGE_DIR"
-      tar xf "/tmp/${archive}" -C "$(dirname "$FLUTTER_BRIDGE_DIR")"
-      mv "$(dirname "$FLUTTER_BRIDGE_DIR")/flutter" "$FLUTTER_BRIDGE_DIR"
-    fi
-    "$FLUTTER_BRIDGE_DIR/bin/flutter" config --no-analytics
+  if bridge_flutter_is_usable; then
+    return 0
   fi
+  if [[ -x "$FLUTTER_BRIDGE_DIR/bin/flutter" ]]; then
+    log "Flutter em $FLUTTER_BRIDGE_DIR tem Dart < $FLUTTER_BRIDGE_MIN_DART_MAJOR.$FLUTTER_BRIDGE_MIN_DART_MINOR — reinstalando $FLUTTER_BRIDGE_VERSION..."
+  else
+    log "baixando Flutter $FLUTTER_BRIDGE_VERSION para build_runner (apenas freezed)..."
+  fi
+  mkdir -p "$(dirname "$FLUTTER_BRIDGE_DIR")"
+  local os arch archive url
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  if [[ "$os" == "Darwin" ]]; then
+    archive="flutter_macos_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+    url="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${archive}"
+    curl -L "$url" -o "/tmp/${archive}"
+    rm -rf "$FLUTTER_BRIDGE_DIR"
+    unzip -q "/tmp/${archive}" -d "$(dirname "$FLUTTER_BRIDGE_DIR")"
+    mv "$(dirname "$FLUTTER_BRIDGE_DIR")/flutter" "$FLUTTER_BRIDGE_DIR"
+  else
+    archive="flutter_linux_${FLUTTER_BRIDGE_VERSION}-stable.tar.xz"
+    url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/${archive}"
+    curl -L "$url" -o "/tmp/${archive}"
+    rm -rf "$FLUTTER_BRIDGE_DIR"
+    tar xf "/tmp/${archive}" -C "$(dirname "$FLUTTER_BRIDGE_DIR")"
+    mv "$(dirname "$FLUTTER_BRIDGE_DIR")/flutter" "$FLUTTER_BRIDGE_DIR"
+  fi
+  "$FLUTTER_BRIDGE_DIR/bin/flutter" config --no-analytics
 }
 
 # shellcheck source=/dev/null
