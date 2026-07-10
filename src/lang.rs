@@ -109,6 +109,17 @@ pub fn translate(name: String) -> String {
     translate_locale(name, &locale)
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn translate(name: String) -> String {
+    let lang = hbb_common::config::LocalConfig::get_option("lang");
+    let locale = if lang.is_empty() {
+        "en".to_owned()
+    } else {
+        lang
+    };
+    translate_locale(name, &locale)
+}
+
 pub fn translate_locale(name: String, locale: &str) -> String {
     let locale = locale.to_lowercase();
     let mut lang = hbb_common::config::LocalConfig::get_option("lang").to_lowercase();

@@ -1,7 +1,7 @@
 allprojects {
     repositories {
         google()
-        jcenter()
+        mavenCentral()
         maven { url 'https://jitpack.io' }
     }
 }
@@ -10,8 +10,44 @@ rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
-subprojects {
-    project.evaluationDependsOn(':app')
+
+subprojects { subproject ->
+    subproject.plugins.withId("com.android.library") {
+        subproject.extensions.configure(com.android.build.gradle.LibraryExtension) { androidExt ->
+            if (androidExt.namespace == null) {
+                def manifest = subproject.file("src/main/AndroidManifest.xml")
+                if (manifest.exists()) {
+                    def packageName = new groovy.xml.XmlSlurper().parse(manifest).'@package'.text()
+                    if (packageName) {
+                        androidExt.namespace = packageName
+                    }
+                }
+            }
+            androidExt.compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+            androidExt.compileSdk = 36
+        }
+    }
+    subproject.tasks.withType(JavaCompile).configureEach {
+        sourceCompatibility = JavaVersion.VERSION_17.toString()
+        targetCompatibility = JavaVersion.VERSION_17.toString()
+    }
+    subproject.tasks.matching { it.name.contains("JavaWithJavac") }.configureEach { task ->
+        task.sourceCompatibility = JavaVersion.VERSION_17.toString()
+        task.targetCompatibility = JavaVersion.VERSION_17.toString()
+    }
+    subproject.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+    subproject.afterEvaluate {
+        if (subproject.plugins.hasPlugin("com.android.library")) {
+            subproject.android.compileSdk = 36
+        }
+    }
 }
 
 tasks.register("clean", Delete) {

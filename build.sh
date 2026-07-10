@@ -146,7 +146,76 @@ FORCED_PLATFORM=${REMAINING_ARGS[0]:-}
 # shellcheck source=scripts/build-out-dir.sh
 source "$ROOT/scripts/build-out-dir.sh"
 
-ANDROID_NDK_HOME=/Users/belizario/Library/Android/sdk/ndk/27.2.12479018
+ensure_android_signing() {
+  local props_src="$ROOT/config/android-key.properties"
+  local jks="$ROOT/config/android-key.jks"
+  local props_dst="$ROOT/flutter/android/key.properties"
+  local store_password key_password key_alias store_file line key value
+
+  if [[ ! -f "$jks" ]]; then
+    echo "[build] ERRO: keystore não encontrada em config/android-key.jks"
+    exit 1
+  fi
+  if [[ ! -f "$props_src" ]]; then
+    echo "[build] ERRO: credenciais ausentes em config/android-key.properties"
+    echo "[build] Crie o arquivo no submodule config (repo privado)."
+    exit 1
+  fi
+
+  store_password=""
+  key_password=""
+  key_alias=""
+  store_file="android-key.jks"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      storePassword) store_password="$value" ;;
+      keyPassword) key_password="$value" ;;
+      keyAlias) key_alias="$value" ;;
+      storeFile) store_file="$value" ;;
+    esac
+  done < "$props_src"
+
+  if [[ -z "$store_password" || -z "$key_password" || -z "$key_alias" ]]; then
+    echo "[build] ERRO: config/android-key.properties incompleto (storePassword/keyPassword/keyAlias)."
+    exit 1
+  fi
+  if [[ "$store_file" != /* ]]; then
+    store_file="$ROOT/config/$store_file"
+  fi
+
+  # key.properties é gerado (gitignored) a partir do submodule config — senhas não ficam no repo principal.
+  cat > "$props_dst" <<EOF
+storePassword=$store_password
+keyPassword=$key_password
+keyAlias=$key_alias
+storeFile=$store_file
+EOF
+}
+
+ensure_android_ndk() {
+  if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+    local candidate
+    for candidate in \
+      /opt/homebrew/share/android-ndk \
+      "$HOME/Library/Android/sdk/ndk/"*; do
+      if [[ -d "$candidate/toolchains/llvm/prebuilt" ]]; then
+        ANDROID_NDK_HOME="$candidate"
+        break
+      fi
+    done
+  fi
+  if [[ -z "${ANDROID_NDK_HOME:-}" || ! -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" ]]; then
+    echo "[build] ERRO: ANDROID_NDK_HOME não encontrado."
+    echo "[build] Instale o NDK (ex.: brew install --cask android-ndk) ou defina ANDROID_NDK_HOME."
+    exit 1
+  fi
+  export ANDROID_NDK_HOME ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+  ANDROID_NDK_HOST_TAG="$(ls "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" | head -1)"
+  export ANDROID_NDK_HOST_TAG
+}
 
 log_flutter_for_build() {
   echo "[build] Flutter: $(flutter --version 2>/dev/null | head -1)"
@@ -470,27 +539,39 @@ buildLinux()
 buildAndroid()
 {
     ensure_cargo
+    ensure_android_ndk
+    export FLUTTER_ROOT="${FLUTTER_ROOT:-$HOME/dev/flutter-github}"
+    export PATH="$FLUTTER_ROOT/bin:/opt/homebrew/opt/openjdk@17/bin:$PATH"
+    export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}"
+    ensure_bridge
+    export VCPKG_ROOT="${VCPKG_ROOT:-$HOME/.bin/vcpkg}"
+    if [[ ! -f "$VCPKG_ROOT/installed/arm64-android/include/libavutil/attributes.h" ]]; then
+      echo "[build] instalando dependências vcpkg para Android (arm64-v8a)..."
+      ./flutter/build_android_deps.sh arm64-v8a
+    fi
     TARGET=aarch64-linux-android
     echo "Building Android"
     ./flutter/ndk_arm64.sh
     mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
-    cp ./target/aarch64-linux-android/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
-
-    sed -i '' "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
-
-    cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/
     cp "./target/$TARGET/release/liblibrustdesk.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
-    local ANDROID_OUT_DIR
-    ANDROID_OUT_DIR="$(bgdesk_build_out_dir android aarch64)"
+
+    ensure_android_signing
+
+    cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$ANDROID_NDK_HOST_TAG/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/
+    local ANDROID_OUT_DIR ANDROID_MODE ANDROID_APK_NAME
+    ANDROID_OUT_DIR="$(bgdesk_build_out_dir android universal)"
+    ANDROID_MODE="$(bgdesk_build_mode)"
+    ANDROID_APK_NAME="bgdesk-${ANDROID_MODE}-universal.apk"
     bgdesk_prepare_build_out_dir "$ANDROID_OUT_DIR"
     pushd flutter >/dev/null
-    flutter build apk "--release" --target-platform android-arm64 --split-per-abi
-    cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../${ANDROID_OUT_DIR}/bgdesk.apk"
+    # Sempre APK universal (fat), nunca --split-per-abi
+    flutter build apk --release
+    cp build/app/outputs/flutter-apk/app-release.apk "../${ANDROID_OUT_DIR}/${ANDROID_APK_NAME}"
     popd >/dev/null
     echo ""
     echo "=== Build Android concluído ==="
     echo "Pasta: $ROOT/$ANDROID_OUT_DIR/"
-    ls -la "$ANDROID_OUT_DIR/bgdesk.apk" 2>/dev/null || true
+    ls -la "$ANDROID_OUT_DIR/${ANDROID_APK_NAME}" 2>/dev/null || true
 }
 
 # ./build.sh --build-bridges — só regenera o bridge (sem build de plataforma)
