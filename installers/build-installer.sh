@@ -5,8 +5,9 @@
 #   ./installers/build-installer.sh suporte
 #   ./installers/build-installer.sh cliente
 #
-# Saída: build/windows-x86_64-suporte/bgdesk-suporte-win64.exe
-#        build/windows-x86_64-cliente/bgdesk-cliente-win64.exe
+# Entrada: build/windows-x86_64-*/extracted/ (app compilado)
+# Saída:   build/windows-x86_64-suporte/bgdesk-suporte-win64.exe
+#          build/windows-x86_64-cliente/bgdesk-cliente-win64.exe
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,6 +58,7 @@ find_iscc() {
 
 ISS_FILE="$ROOT/installers/${MODE}.iss"
 WIN_OUT_DIR="$ROOT/$(bgdesk_build_out_dir windows x86_64)"
+WIN_APP_DIR="$ROOT/$(bgdesk_windows_app_dir x86_64)"
 INSTALLER_BASE="bgdesk-${MODE}-win64"
 INSTALLER_OUT="$WIN_OUT_DIR/${INSTALLER_BASE}.exe"
 
@@ -64,8 +66,8 @@ if [[ ! -f "$ISS_FILE" ]]; then
   echo "[installer] ERRO: script não encontrado: $ISS_FILE" >&2
   exit 1
 fi
-if [[ ! -f "$WIN_OUT_DIR/bgdesk.exe" ]]; then
-  echo "[installer] ERRO: build não encontrado: $WIN_OUT_DIR/bgdesk.exe" >&2
+if [[ ! -f "$WIN_APP_DIR/bgdesk.exe" ]]; then
+  echo "[installer] ERRO: build não encontrado: $WIN_APP_DIR/bgdesk.exe" >&2
   echo "[installer] Rode ./build.sh primeiro." >&2
   exit 1
 fi
@@ -85,7 +87,7 @@ fi
 
 mkdir -p "$WIN_OUT_DIR"
 log "compilando $INSTALLER_BASE.exe ..."
-"$ISCC" "/DBuildOutSubdir=$(basename "$WIN_OUT_DIR")" "$ISS_FILE"
+"$ISCC" "$ISS_FILE"
 
 if [[ ! -f "$INSTALLER_OUT" ]]; then
   echo "[installer] ERRO: saída esperada não encontrada: $INSTALLER_OUT" >&2

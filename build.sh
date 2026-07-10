@@ -264,9 +264,11 @@ buildWindows()
     ensure_cargo
     setup_windows_build_env
     ensure_bridge
-    local WIN_OUT_DIR
+    local WIN_OUT_DIR WIN_APP_DIR
     WIN_OUT_DIR="$(bgdesk_build_out_dir windows x86_64)"
+    WIN_APP_DIR="$(bgdesk_windows_app_dir x86_64)"
     bgdesk_prepare_build_out_dir "$WIN_OUT_DIR"
+    mkdir -p "$WIN_APP_DIR"
     local BUILD_ARGS=(--flutter --skip-portable-pack)
     if [[ "$BGDESK_CLIENTE" == "1" ]]; then
       BUILD_ARGS+=(--incoming-only)
@@ -278,12 +280,12 @@ buildWindows()
     echo "[build] VCPKG_ROOT=$VCPKG_ROOT"
     echo "[build] LIBCLANG_PATH=$LIBCLANG_PATH"
     $PYTHON build.py "${BUILD_ARGS[@]}"
-    cp -r flutter/build/windows/x64/runner/Release/. "$WIN_OUT_DIR"/.
-    if [[ -f "$WIN_OUT_DIR/rustdesk.exe" ]]; then
-      cp "$WIN_OUT_DIR/rustdesk.exe" "$WIN_OUT_DIR/bgdesk.exe"
-      rm -f "$WIN_OUT_DIR/rustdesk.exe"
+    cp -r flutter/build/windows/x64/runner/Release/. "$WIN_APP_DIR"/.
+    if [[ -f "$WIN_APP_DIR/rustdesk.exe" ]]; then
+      cp "$WIN_APP_DIR/rustdesk.exe" "$WIN_APP_DIR/bgdesk.exe"
+      rm -f "$WIN_APP_DIR/rustdesk.exe"
     fi
-    bash "$ROOT/scripts/sign-pe.sh" "$ROOT/$WIN_OUT_DIR/bgdesk.exe"
+    bash "$ROOT/scripts/sign-pe.sh" "$ROOT/$WIN_APP_DIR/bgdesk.exe"
     local INSTALLER_MODE="suporte"
     if [[ "$BGDESK_CLIENTE" == "1" ]]; then
       INSTALLER_MODE="cliente"
@@ -291,8 +293,9 @@ buildWindows()
     bash "$ROOT/installers/build-installer.sh" "$INSTALLER_MODE"
     echo ""
     echo "=== Build Windows concluído ==="
-    echo "Pasta: $ROOT/$WIN_OUT_DIR/"
-    ls -la "$WIN_OUT_DIR/bgdesk.exe" 2>/dev/null || true
+    echo "App: $ROOT/$WIN_APP_DIR/"
+    ls -la "$WIN_APP_DIR/bgdesk.exe" 2>/dev/null || true
+    echo "Instalador: $ROOT/$WIN_OUT_DIR/"
     if [[ -f "$ROOT/$WIN_OUT_DIR/bgdesk-${INSTALLER_MODE}-win64.exe" ]]; then
       ls -la "$ROOT/$WIN_OUT_DIR/bgdesk-${INSTALLER_MODE}-win64.exe"
     fi

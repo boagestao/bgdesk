@@ -4,7 +4,8 @@
 # Exemplos:
 #   build/linux-aarch64-cliente/
 #   build/macOS-aarch64-suporte/
-#   build/windows-x86_64-suporte/
+#   build/windows-x86_64-suporte/          (instalador .exe)
+#   build/windows-x86_64-suporte/extracted/ (app compilado)
 
 bgdesk_build_mode() {
   if [[ "${BGDESK_CLIENTE:-0}" == "1" ]]; then
@@ -31,4 +32,11 @@ bgdesk_prepare_build_out_dir() {
   local out_dir="$1"
   rm -rf "$out_dir"
   mkdir -p "$out_dir"
+}
+
+# Uso: bgdesk_windows_app_dir [arch]
+# Retorna build/windows-<arch>-<modo>/extracted (binários do app Windows).
+bgdesk_windows_app_dir() {
+  local arch="${1:-x86_64}"
+  echo "$(bgdesk_build_out_dir windows "$arch")/extracted"
 }
