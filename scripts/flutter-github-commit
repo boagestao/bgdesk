@@ -1,8 +1,14 @@
 # flutter/flutter — commit fixo para builds macOS locais (./build.sh mac).
-# Branch de origem: master
+# Branch de origem: master (artefatos oficiais publicados).
 #
 # Versão observada: Flutter 3.46.0-1.0.pre-508 (channel master)
 # Mensagem do commit: [web] Roll Chrome to 145 (framework) (#182861)
+#
+# O fix de lifecycle macOS (UI congelada após Cmd-Tab / Mission Control) NÃO
+# está neste commit — é aplicado via patch gerado a partir do HEAD do
+# PR https://github.com/flutter/flutter/pull/188772
+#   commit de referência: 4332f3e5133eac007a5c290847deceac9bf494f5
+#   scripts/patches/flutter-4332f3e-macos-occlusion-resume.patch
 #
 # Atualize este arquivo somente após validar um build macOS completo.
 # Para re-sincronizar o clone local com este commit: ./build.sh mac --flutter

@@ -9,7 +9,7 @@ import device_info_plus
 import flutter_custom_cursor
 import package_info_plus
 import screen_retriever
-import sqflite
+import sqflite_darwin
 // import tray_manager
 import uni_links_desktop
 import url_launcher_macos

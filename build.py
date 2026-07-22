@@ -121,7 +121,7 @@ def verify_flutter_root() -> None:
 
 
 def flutter_local_engine_flags() -> str:
-    """Flags --local-engine* quando há build local do engine (patch macOS d70a0d3)."""
+    """Flags --local-engine* quando há build local do engine (patch macOS PR #188772)."""
     if not osx:
         return ''
     root = os.environ.get('FLUTTER_ROOT', '')
@@ -165,7 +165,7 @@ def write_flutter_build_stamp() -> None:
     local_flags = flutter_local_engine_flags()
     extra = ''
     if patch_applied:
-        extra += f'FLUTTER_ENGINE_PATCH=d70a0d3-macos-occlusion-resume applied={patch_applied}\n'
+        extra += f'FLUTTER_ENGINE_PATCH=4332f3e-macos-occlusion-resume applied={patch_applied}\n'
     if local_flags:
         extra += f'FLUTTER_LOCAL_ENGINE_FLAGS={local_flags.strip()}\n'
     stamp.write_text(
@@ -623,7 +623,7 @@ def build_flutter_dmg(version, features):
             sys.stderr.write(f'[build.py] engine local:{local_flags}\n')
         elif os.environ.get('FLUTTER_ENGINE_PATCH_APPLIED') == '1':
             sys.stderr.write(
-                '[build.py] AVISO: patch d70a0d3 aplicado no source do engine, mas sem build local.\n'
+                '[build.py] AVISO: patch 4332f3e (PR #188772) aplicado no source do engine, mas sem build local.\n'
                 '[build.py] Rode ./scripts/build-flutter-local-engine-macos.sh para o fix entrar no app.\n')
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES {flutter} build macos --release{local_flags}')

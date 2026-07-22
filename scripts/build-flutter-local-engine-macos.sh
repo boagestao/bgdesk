@@ -37,6 +37,9 @@ if [[ ! -f "$GCLIENT_FILE" ]]; then
 fi
 
 if [[ ! -d "$FLUTTER_ROOT/engine/src/flutter/third_party/skia" ]]; then
+  if [[ -f "$OUT_DIR/.bgdesk-engine-pruned" ]]; then
+    die "engine source foi podado ($OUT_DIR/.bgdesk-engine-pruned). Para recompilar o engine, restaure o clone Flutter completo."
+  fi
   log "gclient sync (primeira vez — pode demorar e baixar vários GB)..."
   git -C "$FLUTTER_ROOT" config --local core.longpaths true 2>/dev/null || true
   (cd "$FLUTTER_ROOT" && gclient sync -D --no-history)
@@ -49,9 +52,29 @@ ET="$FLUTTER_ROOT/engine/src/flutter/bin/et"
 [[ -x "$ET" ]] || die "et não encontrado em $ET"
 
 log "compilando engine --config $ENGINE_CONFIG (pode demorar)..."
-"$ET" build --config "$ENGINE_CONFIG"
+"$ET" build --config "$ENGINE_CONFIG" -- FlutterMacOS.xcframework || \
+  ninja -C "$OUT_DIR" FlutterMacOS.framework FlutterMacOS.xcframework
 
 [[ -d "$OUT_DIR" ]] || die "build não gerou $OUT_DIR"
+[[ -d "$OUT_DIR/FlutterMacOS.xcframework" ]] || \
+  die "FlutterMacOS.xcframework ausente em $OUT_DIR (necessário para pod install)"
+
+# Flutter tools procuram gen_snapshot_arm64 em ./, universal/ ou clang_arm64/
+if [[ -x "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" ]]; then
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/gen_snapshot_arm64"
+  mkdir -p "$OUT_DIR/universal" "$OUT_DIR/clang_arm64"
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/universal/gen_snapshot_arm64"
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/clang_arm64/gen_snapshot_arm64"
+elif [[ ! -e "$OUT_DIR/gen_snapshot_arm64" ]]; then
+  log "compilando gen_snapshot_arm64..."
+  ninja -C "$OUT_DIR" artifacts_arm64/gen_snapshot_arm64
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/gen_snapshot_arm64"
+  mkdir -p "$OUT_DIR/universal" "$OUT_DIR/clang_arm64"
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/universal/gen_snapshot_arm64"
+  ln -sfn "$OUT_DIR/artifacts_arm64/gen_snapshot_arm64" "$OUT_DIR/clang_arm64/gen_snapshot_arm64"
+fi
+
+
 
 export FLUTTER_LOCAL_ENGINE="$ENGINE_CONFIG"
 export FLUTTER_LOCAL_ENGINE_HOST="$ENGINE_CONFIG"

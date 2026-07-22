@@ -376,13 +376,38 @@ buildWindows()
     fi
 }
 
+wire_macos_engine_cache_stubs() {
+  # podhelper.rb exige darwin-x64(/-release)/FlutterMacOS.xcframework mesmo com
+  # --local-engine (só checa existência; o link real vem do out/).
+  local engine_out="$1"
+  local xcframework="$engine_out/FlutterMacOS.xcframework"
+  local cache_engine="$FLUTTER_ROOT/bin/cache/artifacts/engine"
+  local stub
+  [[ -d "$xcframework" ]] || return 0
+  for stub in darwin-x64 darwin-x64-release; do
+    mkdir -p "$cache_engine/$stub"
+    ln -sfn "$xcframework" "$cache_engine/$stub/FlutterMacOS.xcframework"
+  done
+}
+
 ensure_local_flutter_engine() {
-  [[ "$FLUTTER_UPDATE" == "1" ]] || return 0
-  local engine_out="$FLUTTER_ROOT/engine/src/out/host_release_arm64/FlutterMacOS.framework"
+  # Sem engine local, o patch de occlusion-resume fica só no source e não entra no app.
+  local engine_out="$FLUTTER_ROOT/engine/src/out/host_release_arm64"
+  local framework="$engine_out/FlutterMacOS.framework/Versions/A/FlutterMacOS"
+  local xcframework="$engine_out/FlutterMacOS.xcframework"
   [[ "${FLUTTER_ENGINE_PATCH_APPLIED:-}" == "1" ]] || return 0
-  [[ -f "$engine_out/Versions/A/FlutterMacOS" ]] && return 0
-  echo "[build] engine local não encontrado; compilando (pode demorar)..."
+  if [[ -f "$framework" && -d "$xcframework" ]]; then
+    wire_macos_engine_cache_stubs "$engine_out"
+    return 0
+  fi
+  if [[ -f "$engine_out/.bgdesk-engine-pruned" ]]; then
+    echo "[build] ERRO: engine local podado está incompleto ($engine_out)."
+    echo "[build] Restaure o clone Flutter e rode ./scripts/build-flutter-local-engine-macos.sh"
+    exit 1
+  fi
+  echo "[build] engine local incompleto (framework/xcframework); compilando (pode demorar)..."
   "$ROOT/scripts/build-flutter-local-engine-macos.sh"
+  wire_macos_engine_cache_stubs "$engine_out"
 }
 
 setup_macos_flutter_github() {

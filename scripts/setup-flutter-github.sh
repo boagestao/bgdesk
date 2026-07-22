@@ -65,7 +65,9 @@ checkout_flutter_github_commit() {
 
   if [[ "$FLUTTER_UPDATE" == "1" ]]; then
     log "sincronizando clone com commit fixo ${FLUTTER_GITHUB_COMMIT:0:12}..."
+    # Commit pode estar só em PR (ex.: #188772); tenta SHA, depois refs/pull/*/head.
     flutter_git fetch origin "$FLUTTER_GITHUB_COMMIT" --depth=1 2>/dev/null \
+      || flutter_git fetch origin pull/188772/head --depth=1 2>/dev/null \
       || flutter_git fetch origin --tags --prune
   else
     [[ -d "$FLUTTER_GITHUB_DIR/.git" ]] || \
@@ -78,7 +80,8 @@ checkout_flutter_github_commit() {
     log "checkout ${FLUTTER_GITHUB_COMMIT:0:12} (atual: ${current:0:12})"
     if ! flutter_git checkout --force "$FLUTTER_GITHUB_COMMIT" 2>/dev/null; then
       [[ "$FLUTTER_UPDATE" == "1" ]] || die "commit ${FLUTTER_GITHUB_COMMIT:0:12} indisponível localmente. Rode: ./build.sh mac --flutter"
-      flutter_git fetch origin "$FLUTTER_GITHUB_COMMIT" --depth=1 \
+      flutter_git fetch origin "$FLUTTER_GITHUB_COMMIT" --depth=1 2>/dev/null \
+        || flutter_git fetch origin pull/188772/head --depth=1 2>/dev/null \
         || flutter_git fetch origin --tags --prune
       flutter_git checkout --force "$FLUTTER_GITHUB_COMMIT"
     fi
@@ -105,7 +108,7 @@ export FLUTTER_GITHUB_REV="$(flutter_git rev-parse HEAD)"
 # flutter precache/config não aceitam FLUTTER_ENGINE/FLUTTER_LOCAL_ENGINE no ambiente.
 unset FLUTTER_ENGINE FLUTTER_LOCAL_ENGINE FLUTTER_LOCAL_ENGINE_HOST
 
-# Patch macOS occlusion-resume (flutter#155977, d70a0d3) — idempotente após checkout.
+# Patch macOS occlusion-resume (flutter#188772 / #155977, 4332f3e) — idempotente após checkout.
 BGDESK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$BGDESK_ROOT/scripts/apply-flutter-engine-patch.sh"
