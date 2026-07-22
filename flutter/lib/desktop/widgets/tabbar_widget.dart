@@ -485,6 +485,11 @@ class _DesktopTabState extends State<DesktopTab>
       } else {
         await mainWindowClose();
       }
+      // Keep running when remote / file-transfer / terminal windows are open.
+      // Otherwise quit via maybeQuitWhenNoWindows().
+      if (isMacOS && !rustDeskWinManager.hasOpenSessionWindows()) {
+        unawaited(maybeQuitWhenNoWindows());
+      }
     } else {
       // it's safe to hide the subwindow
       final controller = WindowController.fromWindowId(kWindowId!);
@@ -504,12 +509,10 @@ class _DesktopTabState extends State<DesktopTab>
             await notMainWindowClose(controller);
           }
         }
+        unawaited(maybeQuitWhenNoWindows());
       } else {
         await notMainWindowClose(controller);
       }
-    }
-    if (isMacOS) {
-      unawaited(maybeQuitWhenNoWindows());
     }
     super.onWindowClose();
   }

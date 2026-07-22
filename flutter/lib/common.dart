@@ -2861,8 +2861,18 @@ Future<bool> hasAnyVisibleWindow() async {
 bool _quitInProgress = false;
 
 /// Quit the application when no windows are active or visible.
+///
+/// On macOS, closing the main window only hides it. The app must stay running
+/// while remote / file-transfer / terminal (etc.) session windows are still
+/// open, and quit only when none remain.
 Future<void> maybeQuitWhenNoWindows() async {
   if (_quitInProgress) {
+    return;
+  }
+  // Session windows still open → keep the process alive (even if main was hidden).
+  if (rustDeskWinManager.hasOpenSessionWindows()) {
+    debugPrint(
+        '[MultiWindowHandler] session windows still open, skip quit');
     return;
   }
   if (rustDeskWinManager.getActiveWindows().isNotEmpty) {
@@ -2871,6 +2881,11 @@ Future<void> maybeQuitWhenNoWindows() async {
   if (isMacOS) {
     // Wait for hide/close operations to finish before checking visibility.
     await Future.delayed(const Duration(milliseconds: 300));
+    if (rustDeskWinManager.hasOpenSessionWindows()) {
+      debugPrint(
+          '[MultiWindowHandler] session windows still open after delay, skip quit');
+      return;
+    }
     if (rustDeskWinManager.getActiveWindows().isNotEmpty) {
       return;
     }
@@ -2924,6 +2939,9 @@ Future<void> maybeQuitWhenNoWindows() async {
 Future<void> onActiveWindowChanged() async {
   print(
       "[MultiWindowHandler] active window changed: ${rustDeskWinManager.getActiveWindows()}");
+  if (rustDeskWinManager.hasOpenSessionWindows()) {
+    return;
+  }
   if (rustDeskWinManager.getActiveWindows().isEmpty) {
     await maybeQuitWhenNoWindows();
   }

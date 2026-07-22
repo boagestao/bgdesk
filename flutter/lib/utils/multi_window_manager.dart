@@ -517,6 +517,22 @@ class RustDeskMultiWindowManager {
     return _activeWindows;
   }
 
+  /// Whether any remote / file-transfer / terminal / camera / port-forward
+  /// window is still open (created and not user-closed/hidden).
+  ///
+  /// Used on macOS so closing the main window does not quit the app while
+  /// session windows remain. Relies on the type lists + inactive set rather
+  /// than only `_activeWindows` / native visibility, which can be stale.
+  bool hasOpenSessionWindows() {
+    bool listHasOpen(List<int> windows) =>
+        windows.any((id) => !_inactiveWindows.contains(id));
+    return listHasOpen(_remoteDesktopWindows) ||
+        listHasOpen(_fileTransferWindows) ||
+        listHasOpen(_viewCameraWindows) ||
+        listHasOpen(_portForwardWindows) ||
+        listHasOpen(_terminalWindows);
+  }
+
   Future<void> _notifyActiveWindow() async {
     for (final callback in _windowActiveCallbacks) {
       await callback.call();

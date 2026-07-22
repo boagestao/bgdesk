@@ -1,10 +1,12 @@
 import Cocoa
 import FlutterMacOS
 
-/// Returns true if any application window is currently visible to the user.
+/// Returns true if any application window is on-screen or miniaturized in the Dock.
+/// Miniaturized windows still count: closing the main window must not quit while
+/// a remote/file-transfer/terminal window is only minimized.
 func hasVisibleAppWindows() -> Bool {
     return NSApplication.shared.windows.contains { window in
-        window.isVisible
+        window.isVisible || window.isMiniaturized
     }
 }
 
