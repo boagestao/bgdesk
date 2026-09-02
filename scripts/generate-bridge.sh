@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gera generated_bridge.dart + generated_bridge.freezed.dart + bridge Rust.
 #
-# Usa o Flutter stable pinado (scripts/setup-flutter-stable.sh) para codegen
-# e para build_runner/freezed.
+# Codegen: Flutter stable pinado (3.47.x).
+# freezed/build_runner: Flutter 3.44.4 — o analyzer do freezed 2.5 não lê Dart 3.13.
 
 set -euo pipefail
 
@@ -20,8 +20,8 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-FLUTTER_BRIDGE_DIR="${FLUTTER_BRIDGE_DIR:-$ROOT/.tools/flutter-stable}"
-FLUTTER_BRIDGE_VERSION="${FLUTTER_BRIDGE_VERSION:-}"
+FLUTTER_BRIDGE_DIR="${FLUTTER_BRIDGE_DIR:-$ROOT/.tools/flutter-bridge-tools}"
+FLUTTER_BRIDGE_VERSION="${FLUTTER_BRIDGE_VERSION:-3.44.4}"
 FLUTTER_BRIDGE_MIN_DART_MAJOR=3
 FLUTTER_BRIDGE_MIN_DART_MINOR=9
 
@@ -45,22 +45,59 @@ bridge_flutter_is_usable() {
 }
 
 setup_bridge_flutter() {
-  if bridge_flutter_is_usable; then
-    return 0
+  local bin ver archive url tmp parent extracted os arch
+  bin="$FLUTTER_BRIDGE_DIR/bin/flutter"
+  if [[ -x "$bin" ]]; then
+    ver="$("$bin" --version 2>/dev/null | head -1 || true)"
+    if [[ "$ver" == *"$FLUTTER_BRIDGE_VERSION"* ]]; then
+      return 0
+    fi
+    log "Flutter em $FLUTTER_BRIDGE_DIR não é $FLUTTER_BRIDGE_VERSION — reinstalando..."
+  else
+    log "baixando Flutter $FLUTTER_BRIDGE_VERSION para build_runner (freezed)..."
   fi
-  log "ERRO: Flutter em $FLUTTER_BRIDGE_DIR não tem Dart >= $FLUTTER_BRIDGE_MIN_DART_MAJOR.$FLUTTER_BRIDGE_MIN_DART_MINOR."
-  log "Rode ./scripts/setup-flutter-stable.sh (Flutter $FLUTTER_BRIDGE_VERSION)."
-  exit 1
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  parent="$(dirname "$FLUTTER_BRIDGE_DIR")"
+  mkdir -p "$parent" "$ROOT/.tools/tmp"
+  if [[ "$os" == "Darwin" ]]; then
+    if [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
+      archive="flutter_macos_arm64_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+    else
+      archive="flutter_macos_${FLUTTER_BRIDGE_VERSION}-stable.zip"
+    fi
+    url="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${archive}"
+  else
+    archive="flutter_linux_${FLUTTER_BRIDGE_VERSION}-stable.tar.xz"
+    url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/${archive}"
+  fi
+  tmp="$ROOT/.tools/tmp/$archive"
+  curl -fL "$url" -o "$tmp"
+  rm -rf "$FLUTTER_BRIDGE_DIR"
+  extracted="$parent/flutter"
+  rm -rf "$extracted"
+  case "$archive" in
+    *.zip) unzip -q "$tmp" -d "$parent" ;;
+    *)     tar xf "$tmp" -C "$parent" ;;
+  esac
+  [[ -d "$extracted" ]] || { log "ERRO: extração falhou em $extracted"; exit 1; }
+  mv "$extracted" "$FLUTTER_BRIDGE_DIR"
+  rm -f "$tmp"
+  "$FLUTTER_BRIDGE_DIR/bin/flutter" config --no-analytics
 }
 
 # shellcheck source=/dev/null
 source "$ROOT/scripts/setup-flutter-stable.sh"
-FLUTTER_BRIDGE_DIR="${FLUTTER_ROOT}"
-FLUTTER_BRIDGE_VERSION="${FLUTTER_STABLE_VERSION}"
 
 if ! command -v flutter_rust_bridge_codegen &>/dev/null; then
   cargo install flutter_rust_bridge_codegen --version 1.80.1 --features "uuid" --locked
 fi
+
+log "flutter pub get (necessário para pubspec.lock)..."
+(
+  cd "$ROOT/flutter"
+  flutter pub get
+)
 
 log "gerando bridge (Rust + Dart, sem build_runner)..."
 flutter_rust_bridge_codegen --no-build-runner \
