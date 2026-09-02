@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifica se um BGDesk.app foi compilado com Flutter master do GitHub.
+# Verifica se um BGDesk.app foi compilado com o Flutter stable pinado.
 set -euo pipefail
 
 APP="${1:-}"
@@ -35,26 +35,30 @@ elif [[ -f "$BUILD_STAMP" ]]; then
   echo "AVISO: o app não contém o stamp — provavelmente build antigo ou cópia manual."
 else
   echo "ERRO: nenhum flutter-build-stamp.txt encontrado."
-  echo "Este app NÃO foi gerado pelo pipeline atual (./build.sh com Flutter GitHub master)."
+  echo "Este app NÃO foi gerado pelo pipeline atual (./build.sh com Flutter stable)."
   exit 1
 fi
 
-if ! grep -q "github.com/flutter/flutter" "$STAMP_FILE"; then
-  echo "ERRO: stamp não indica repositório GitHub oficial."
-  exit 1
-fi
-
-if ! grep -Eq 'channel (master|\[user-branch\])' "$STAMP_FILE"; then
-  echo "ERRO: stamp não indica channel master ou commit fixo ([user-branch])."
-  exit 1
-fi
-
-PIN_FILE="$(cd "$(dirname "$0")" && pwd)/flutter-github-commit"
+PIN_FILE="$(cd "$(dirname "$0")" && pwd)/flutter-stable-version"
+PIN_VERSION=""
 if [[ -f "$PIN_FILE" ]]; then
-  PIN_COMMIT="$(grep -v '^[[:space:]]*#' "$PIN_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '[:space:]')"
-  if [[ -n "$PIN_COMMIT" ]] && ! grep -qF "$PIN_COMMIT" "$STAMP_FILE"; then
-    echo "AVISO: stamp não corresponde ao commit fixo em scripts/flutter-github-commit ($PIN_COMMIT)."
-  fi
+  PIN_VERSION="$(grep -v '^[[:space:]]*#' "$PIN_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '[:space:]')"
 fi
 
-echo "OK — app compilado com Flutter master do GitHub (commit fixo)."
+if grep -q "channel stable" "$STAMP_FILE"; then
+  if [[ -n "$PIN_VERSION" ]] && ! grep -qF "$PIN_VERSION" "$STAMP_FILE"; then
+    echo "AVISO: stamp não corresponde ao Flutter stable em scripts/flutter-stable-version ($PIN_VERSION)."
+  fi
+  echo "OK — app compilado com Flutter stable (engine pré-compilado)."
+  exit 0
+fi
+
+if grep -q "github.com/flutter/flutter" "$STAMP_FILE" && \
+   grep -Eq 'channel (master|\[user-branch\])' "$STAMP_FILE"; then
+  echo "AVISO: este app foi gerado com Flutter master/GitHub (pipeline antigo)."
+  echo "O build macOS atual usa Flutter stable (scripts/flutter-stable-version)."
+  exit 1
+fi
+
+echo "ERRO: stamp não indica Flutter stable."
+exit 1

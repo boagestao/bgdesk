@@ -12,7 +12,7 @@ apply_flutter_engine_patch() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   root="$(cd "$script_dir/.." && pwd)"
   patch="$root/scripts/patches/flutter-4332f3e-macos-occlusion-resume.patch"
-  flutter_root="${FLUTTER_ROOT:-${FLUTTER_GITHUB_DIR:-$HOME/dev/flutter-github}}"
+  flutter_root="${FLUTTER_ROOT:-${FLUTTER_GITHUB_DIR:-$root/.tools/flutter-github}}"
   engine_mm="$flutter_root/engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterEngine.mm"
   engine_out="$flutter_root/engine/src/out/${FLUTTER_ENGINE_CONFIG:-host_release_arm64}"
   marker="$engine_out/.bgdesk-engine-patch"

@@ -1,0 +1,11 @@
+# Flutter stable para builds manuais macOS (./build.sh mac).
+# SDK oficial pré-compilado — o engine NÃO é compilado localmente.
+#
+# Versão: 3.47.2 (channel stable, 2026-08-27)
+# Hash:   d3b14c876900e553bc736ca19295fc09e3853e8e
+# Dart:   3.13.2
+#
+# Atualize este arquivo para a versão em
+# https://docs.flutter.dev/install/archive (channel stable).
+# Para reinstalar: ./build.sh mac --flutter
+3.47.2

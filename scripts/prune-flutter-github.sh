@@ -15,10 +15,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FLUTTER_ROOT="${FLUTTER_ROOT:-${FLUTTER_GITHUB_DIR:-$HOME/dev/flutter-github}}"
+FLUTTER_ROOT="${FLUTTER_ROOT:-${FLUTTER_GITHUB_DIR:-$ROOT/.tools/flutter-github}}"
 ENGINE_CONFIG="${FLUTTER_ENGINE_CONFIG:-host_release_arm64}"
 OUT_DIR="$FLUTTER_ROOT/engine/src/out/$ENGINE_CONFIG"
-DEPOT_TOOLS="${DEPOT_TOOLS:-$HOME/dev/depot_tools}"
+DEPOT_TOOLS="${DEPOT_TOOLS:-$ROOT/.tools/depot_tools}"
 MARKER="$OUT_DIR/.bgdesk-engine-pruned"
 
 log() { echo "[flutter-prune] $*"; }

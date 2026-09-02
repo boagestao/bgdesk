@@ -8,7 +8,7 @@
 #   ./scripts/setup-flutter-github.sh
 #
 # Variáveis:
-#   FLUTTER_GITHUB_DIR     diretório do clone (padrão: ~/dev/flutter-github)
+#   FLUTTER_GITHUB_DIR     diretório do clone (padrão: <repo>/.tools/flutter-github)
 #   FLUTTER_REPO           repositório git (padrão: github.com/flutter/flutter)
 #   FLUTTER_GITHUB_COMMIT  sobrescreve o commit em scripts/flutter-github-commit
 #   FLUTTER_SKIP_VERIFY    se "1", não aborta em verify_flutter_github (não recomendado)
@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-FLUTTER_GITHUB_DIR="${FLUTTER_GITHUB_DIR:-$HOME/dev/flutter-github}"
+_BGDESK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FLUTTER_GITHUB_DIR="${FLUTTER_GITHUB_DIR:-$_BGDESK_ROOT/.tools/flutter-github}"
 FLUTTER_REPO="${FLUTTER_REPO:-https://github.com/flutter/flutter.git}"
 
 log() { echo "[flutter-github] $*"; }

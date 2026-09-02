@@ -69,33 +69,48 @@ ensure_cargo_on_path()
 
 
 def use_flutter_github() -> bool:
-    """Flutter master do GitHub: apenas builds manuais macOS via ./build.sh."""
+    """Clone GitHub master + engine local: apenas se BGDESK_FLUTTER_GITHUB=1."""
     return osx and os.environ.get('BGDESK_FLUTTER_GITHUB') == '1'
 
 
+def use_flutter_stable() -> bool:
+    """SDK Flutter stable oficial (pré-compilado) para builds manuais macOS."""
+    return os.environ.get('BGDESK_FLUTTER_STABLE') == '1'
+
+
 def flutter_bin() -> str:
-    if use_flutter_github():
-        root = os.environ.get('FLUTTER_ROOT', '')
-        if not root:
-            sys.stderr.write(
-                'FLUTTER_ROOT não definido. Execute ./build.sh no macOS '
-                '(usa Flutter master do GitHub).\n')
-            sys.exit(1)
+    root = os.environ.get('FLUTTER_ROOT', '')
+    if root:
         cmd = os.path.join(root, 'bin', 'flutter')
-        if not os.path.isfile(cmd):
-            sys.stderr.write(f'Flutter não encontrado em {cmd}\n')
-            sys.exit(1)
-        return cmd
+        if os.path.isfile(cmd):
+            return cmd
+        sys.stderr.write(f'Flutter não encontrado em {cmd}\n')
+        sys.exit(1)
     return 'flutter'
 
 
 def verify_flutter_root() -> None:
-    if not use_flutter_github():
-        return
     cmd = flutter_bin()
     import subprocess
     result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
     out = result.stdout + result.stderr
+    first = out.splitlines()[0] if out.splitlines() else out
+    if use_flutter_stable():
+        expected = os.environ.get('FLUTTER_STABLE_VERSION', '')
+        if expected and expected not in out:
+            sys.stderr.write(
+                f'ERRO: Flutter não é a versão stable {expected}:\n{out}\n')
+            sys.exit(1)
+        if 'channel stable' not in out:
+            sys.stderr.write(
+                'ERRO: Flutter não está no channel stable:\n' + out)
+            sys.exit(1)
+        sys.stderr.write(f'[build.py] {first}\n')
+        sys.stderr.write(
+            f'[build.py] FLUTTER_STABLE_VERSION={expected}\n')
+        return
+    if not use_flutter_github():
+        return
     if 'github.com/flutter/flutter' not in out:
         sys.stderr.write(
             'ERRO: FLUTTER_ROOT não aponta para o clone oficial do GitHub:\n' + out)
@@ -111,7 +126,7 @@ def verify_flutter_root() -> None:
             sys.stderr.write(
                 f'ERRO: Flutter não está no commit fixo {expected_commit} (HEAD={actual})\n')
             sys.exit(1)
-    sys.stderr.write(f'[build.py] {out.splitlines()[0]}\n')
+    sys.stderr.write(f'[build.py] {first}\n')
     rev = os.environ.get('FLUTTER_GITHUB_REV', '')
     pinned = os.environ.get('FLUTTER_GITHUB_COMMIT', '')
     if pinned:
@@ -121,8 +136,10 @@ def verify_flutter_root() -> None:
 
 
 def flutter_local_engine_flags() -> str:
-    """Flags --local-engine* quando há build local do engine (patch macOS PR #188772)."""
+    """Flags --local-engine* só com FLUTTER_USE_LOCAL_ENGINE=1 (opt-in)."""
     if not osx:
+        return ''
+    if os.environ.get('FLUTTER_USE_LOCAL_ENGINE') != '1':
         return ''
     root = os.environ.get('FLUTTER_ROOT', '')
     if not root:
@@ -151,7 +168,7 @@ def flutter_local_engine_flags() -> str:
 
 
 def write_flutter_build_stamp() -> None:
-    if not use_flutter_github():
+    if not use_flutter_github() and not use_flutter_stable():
         return
     import subprocess
     cmd = flutter_bin()
@@ -160,10 +177,13 @@ def write_flutter_build_stamp() -> None:
     stamp_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
     stamp = stamp_dir / 'flutter-build-stamp.txt'
+    extra = ''
+    if use_flutter_stable():
+        extra += f'FLUTTER_STABLE_VERSION={os.environ.get("FLUTTER_STABLE_VERSION", "")}\n'
+        extra += 'FLUTTER_ENGINE=prebuilt-stable\n'
     rev = os.environ.get('FLUTTER_GITHUB_REV', '')
     patch_applied = os.environ.get('FLUTTER_ENGINE_PATCH_APPLIED', '')
     local_flags = flutter_local_engine_flags()
-    extra = ''
     if patch_applied:
         extra += f'FLUTTER_ENGINE_PATCH=4332f3e-macos-occlusion-resume applied={patch_applied}\n'
     if local_flags:
@@ -613,18 +633,19 @@ def build_flutter_dmg(version, features):
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
     mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
-    local_flags = ''
+    local_flags = flutter_local_engine_flags()
     if use_flutter_github():
         # Rebuild completo para garantir que o engine/framework venha do Flutter master atual.
         system2(f'{flutter} clean')
         system2(f'{flutter} pub get')
-        local_flags = flutter_local_engine_flags()
         if local_flags:
             sys.stderr.write(f'[build.py] engine local:{local_flags}\n')
         elif os.environ.get('FLUTTER_ENGINE_PATCH_APPLIED') == '1':
             sys.stderr.write(
                 '[build.py] AVISO: patch 4332f3e (PR #188772) aplicado no source do engine, mas sem build local.\n'
                 '[build.py] Rode ./scripts/build-flutter-local-engine-macos.sh para o fix entrar no app.\n')
+    elif use_flutter_stable():
+        system2(f'{flutter} pub get')
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES {flutter} build macos --release{local_flags}')
     write_flutter_build_stamp()

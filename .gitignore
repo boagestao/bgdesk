@@ -56,3 +56,5 @@ libsciter.dylib
 flutter/web/
 flutter/pubspec.lock
 scripts/windows-build-env.local.sh
+# Flutter SDK, depot_tools e downloads de toolchain (não versionar)
+.tools/

@@ -75,7 +75,7 @@ Opções:
   --force, -f, force  Recompilação completa (Linux: limpa target/release,
                       flutter build e pacotes). Não regenera o bridge.
   --rebuild-image     Reconstrói a imagem Docker do build Linux.
-  --flutter           Re-sincroniza o clone Flutter com o commit fixo (macOS).
+  --flutter           Reinstala o Flutter stable pinado (macOS).
   --help, -h, help    Mostra esta ajuda.
 
 Exemplos:
@@ -220,7 +220,7 @@ ensure_android_ndk() {
 log_flutter_for_build() {
   echo "[build] Flutter: $(flutter --version 2>/dev/null | head -1)"
   echo "[build] FLUTTER_ROOT=$FLUTTER_ROOT"
-  echo "[build] FLUTTER_GITHUB_REV=${FLUTTER_GITHUB_REV:-?}"
+  echo "[build] FLUTTER_STABLE_VERSION=${FLUTTER_STABLE_VERSION:-?}"
   echo "[build] which flutter: $(command -v flutter)"
 }
 
@@ -376,45 +376,10 @@ buildWindows()
     fi
 }
 
-wire_macos_engine_cache_stubs() {
-  # podhelper.rb exige darwin-x64(/-release)/FlutterMacOS.xcframework mesmo com
-  # --local-engine (só checa existência; o link real vem do out/).
-  local engine_out="$1"
-  local xcframework="$engine_out/FlutterMacOS.xcframework"
-  local cache_engine="$FLUTTER_ROOT/bin/cache/artifacts/engine"
-  local stub
-  [[ -d "$xcframework" ]] || return 0
-  for stub in darwin-x64 darwin-x64-release; do
-    mkdir -p "$cache_engine/$stub"
-    ln -sfn "$xcframework" "$cache_engine/$stub/FlutterMacOS.xcframework"
-  done
-}
-
-ensure_local_flutter_engine() {
-  # Sem engine local, o patch de occlusion-resume fica só no source e não entra no app.
-  local engine_out="$FLUTTER_ROOT/engine/src/out/host_release_arm64"
-  local framework="$engine_out/FlutterMacOS.framework/Versions/A/FlutterMacOS"
-  local xcframework="$engine_out/FlutterMacOS.xcframework"
-  [[ "${FLUTTER_ENGINE_PATCH_APPLIED:-}" == "1" ]] || return 0
-  if [[ -f "$framework" && -d "$xcframework" ]]; then
-    wire_macos_engine_cache_stubs "$engine_out"
-    return 0
-  fi
-  if [[ -f "$engine_out/.bgdesk-engine-pruned" ]]; then
-    echo "[build] ERRO: engine local podado está incompleto ($engine_out)."
-    echo "[build] Restaure o clone Flutter e rode ./scripts/build-flutter-local-engine-macos.sh"
-    exit 1
-  fi
-  echo "[build] engine local incompleto (framework/xcframework); compilando (pode demorar)..."
-  "$ROOT/scripts/build-flutter-local-engine-macos.sh"
-  wire_macos_engine_cache_stubs "$engine_out"
-}
-
-setup_macos_flutter_github() {
-  export BGDESK_FLUTTER_GITHUB=1
-  # Flutter do GitHub (commit fixo em scripts/flutter-github-commit) — build manual macOS
+setup_macos_flutter_stable() {
+  # Flutter stable oficial (scripts/flutter-stable-version) — sem engine local
   # shellcheck source=/dev/null
-  source "$ROOT/scripts/setup-flutter-github.sh"
+  source "$ROOT/scripts/setup-flutter-stable.sh"
 }
 
 ensure_macos_vcpkg() {
@@ -444,10 +409,9 @@ buildMac()
       export VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-osx}"
     fi
     ensure_macos_vcpkg
-    setup_macos_flutter_github
-    # Flutter master precisa dos renames DialogTheme/TabBarTheme e deps novas.
+    setup_macos_flutter_stable
+    # Flutter >= 3.44 precisa dos renames DialogTheme/TabBarTheme e deps novas.
     bash "$ROOT/.github/patches/apply_flutter_3.44_source_patches.sh"
-    ensure_local_flutter_engine
     ensure_bridge
     log_flutter_for_build
     local BUILD_ARGS=(--flutter --hwcodec --unix-file-copy-paste)
@@ -565,7 +529,7 @@ buildAndroid()
 {
     ensure_cargo
     ensure_android_ndk
-    export FLUTTER_ROOT="${FLUTTER_ROOT:-$HOME/dev/flutter-github}"
+    export FLUTTER_ROOT="${FLUTTER_ROOT:-$ROOT/.tools/flutter-stable}"
     export PATH="$FLUTTER_ROOT/bin:/opt/homebrew/opt/openjdk@17/bin:$PATH"
     export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}"
     ensure_bridge
