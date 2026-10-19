@@ -219,8 +219,23 @@ case "$1 $2" in
   'notarytool submit')
     printf '{"id":"test-submission","status":"%s"}\n' "$TEST_NOTARY_STATUS" ;;
   'notarytool log') echo '{"issues": []}' >"${@: -1}" ;;
-  'stapler staple') xattr -w com.bgdesk.test-notary-ticket accepted "$3" ;;
-  'stapler validate') xattr -p com.bgdesk.test-notary-ticket "$3" >/dev/null ;;
+  'stapler staple'|'stapler validate')
+    attempt_file="$TEST_EVENTS.$2.attempts"
+    attempts=0
+    [[ ! -f "$attempt_file" ]] || attempts=$(cat "$attempt_file")
+    attempts=$((attempts + 1))
+    echo "$attempts" > "$attempt_file"
+    failures="${TEST_STAPLE_FAILURES:-0}"
+    [[ "$2" == staple ]] || failures="${TEST_VALIDATE_FAILURES:-0}"
+    if [[ "$attempts" -le "$failures" ]]; then
+      echo 'NSURLErrorDomain Code=-1005: The network connection was lost.' >&2
+      exit "${TEST_STAPLER_EXIT:-68}"
+    fi
+    if [[ "$2" == staple ]]; then
+      xattr -w com.bgdesk.test-notary-ticket accepted "$3"
+    else
+      xattr -p com.bgdesk.test-notary-ticket "$3" >/dev/null
+    fi ;;
   *) exit 99 ;;
 esac
 ''')
@@ -267,6 +282,44 @@ exit "$TEST_GATEKEEPER_EXIT"
         events = (self.base / "events").read_text().splitlines()
         self.assertEqual(events, ["notarytool history", "notarytool submit", "stapler staple",
                                   "stapler validate", "gatekeeper", "gatekeeper"])
+
+    def test_stapler_recovers_from_network_loss_without_resubmitting_notarization(self):
+        env, app, archive = self.mock_distribution_services()
+        env.update(TEST_STAPLE_FAILURES='1', TEST_VALIDATE_FAILURES='1')
+        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
+        self.run_command(["bash", PACKAGE, app, archive], env=env)
+        events = (self.base / 'events').read_text().splitlines()
+        self.assertEqual(events.count('notarytool submit'), 1)
+        self.assertEqual(events.count('stapler staple'), 2)
+        self.assertEqual(events.count('stapler validate'), 2)
+        self.assertEqual((self.base / 'events.sleeps').read_text().splitlines(), ['5', '5'])
+        ticket = self.run_command(['xattr', '-p', 'com.bgdesk.test-notary-ticket', archive])
+        self.assertEqual(ticket.stdout.strip(), 'accepted')
+
+    def test_persistent_stapler_network_failure_is_bounded_and_preserves_previous_dmg(self):
+        env, app, archive = self.mock_distribution_services()
+        env['TEST_STAPLE_FAILURES'] = '99'
+        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
+        result = self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
+        self.assertEqual(result.returncode, 68)
+        self.assertEqual(archive.read_bytes(), b'previous release')
+        events = (self.base / 'events').read_text().splitlines()
+        self.assertEqual(events.count('stapler staple'), 5)
+        self.assertEqual(events.count('notarytool submit'), 1)
+        self.assertNotIn('gatekeeper', events)
+        self.assertEqual((self.base / 'events.sleeps').read_text().splitlines(), ['5', '10', '20', '40'])
+
+    def test_revoked_ticket_is_not_retried_or_published(self):
+        env, app, archive = self.mock_distribution_services()
+        env.update(TEST_STAPLE_FAILURES='99', TEST_STAPLER_EXIT='77')
+        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
+        result = self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
+        self.assertEqual(result.returncode, 77)
+        self.assertEqual(archive.read_bytes(), b'previous release')
+        events = (self.base / 'events').read_text().splitlines()
+        self.assertEqual(events.count('stapler staple'), 1)
+        self.assertNotIn('gatekeeper', events)
+        self.assertFalse((self.base / 'events.sleeps').exists())
 
     def test_installers_reject_invalid_image_before_installing(self):
         env = self.fake_tool("curl", '''

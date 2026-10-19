@@ -242,6 +242,26 @@ verify_signature() {
   fi
 }
 
+stapler_with_retry() {
+  local action="$1" image="$2" attempt=1 delay=5 status
+  while true; do
+    if xcrun stapler "$action" "$image"; then
+      return 0
+    else
+      status=$?
+    fi
+    # EX_NOHOST (68) includes lost CloudKit connections and unexpected service
+    # responses. Retry only after Accepted; permanent ticket/disk errors fail.
+    if [[ "$status" != 68 || "$attempt" -ge 5 ]]; then
+      return "$status"
+    fi
+    echo "[macOS] stapler $action: serviço Apple indisponível (68); nova tentativa em ${delay}s ($attempt/5)." >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
 bash "$ROOT/.github/scripts/sign-macos-app.sh" "$app_path" "$identity" \
   "$ROOT/flutter/macos/Runner/Release.entitlements"
 verify_signature "$app_path"
@@ -279,8 +299,8 @@ if [[ "$local_build" == "0" ]]; then
     xcrun notarytool log "$submission_id" "${notary_args[@]}" "$log_path" || true
     fail "Notarização $status ($submission_id). Consulte $result_path e $log_path."
   fi
-  xcrun stapler staple "$work_dir/final.dmg"
-  xcrun stapler validate "$work_dir/final.dmg"
+  stapler_with_retry staple "$work_dir/final.dmg"
+  stapler_with_retry validate "$work_dir/final.dmg"
   verify_signature "$work_dir/final.dmg"
   spctl --assess --type open --context context:primary-signature --verbose=4 "$work_dir/final.dmg"
 fi
