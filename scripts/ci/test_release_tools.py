@@ -12,6 +12,7 @@ import base64
 import gzip
 import tarfile
 import re
+import sys
 
 import config_archive
 
@@ -111,7 +112,10 @@ class ReleaseToolsTests(unittest.TestCase):
             r2.upload(s3, "bucket", path, "updates/v1/app.dmg")
 
     def test_complete_artifact_matrix_and_hashes_are_required(self):
-        for entry in plan.matrix("all")["include"]:
+        entries = [dict(target, edition=edition)
+                   for target in plan.matrix("all")["include"]
+                   for edition in ("cliente", "suporte")]
+        for entry in entries:
             directory = self.root / f"{entry['platform']}-{entry['arch']}-{entry['edition']}"
             directory.mkdir()
             records = []
@@ -172,8 +176,52 @@ class ReleaseToolsTests(unittest.TestCase):
                 plan.main()
         values = dict(line.split('=',1) for line in output.read_text().splitlines())
         self.assertEqual(values['publish'], 'false')
-        self.assertEqual(len(json.loads(values['matrix'])['include']), 2)
+        self.assertEqual(len(json.loads(values['matrix'])['include']), 1)
         self.assertNotIn('test-config-token', output.read_text())
+
+    def test_build_plan_allocates_one_runner_for_each_platform_and_architecture(self):
+        targets = plan.matrix('all')['include']
+        self.assertEqual({(target['platform'], target['arch']) for target in targets}, {
+            ('macos', 'aarch64'), ('macos', 'x86_64'), ('windows', 'x86_64'),
+            ('linux', 'aarch64'), ('linux', 'x86_64'),
+        })
+        self.assertEqual(len(targets), 5)
+        self.assertTrue(all('edition' not in target for target in targets))
+        for platform, count in (('macos', 2), ('windows', 1), ('linux', 2)):
+            with self.subTest(platform=platform):
+                selected = plan.matrix(platform)['include']
+                self.assertEqual(len(selected), count)
+                self.assertTrue(all(target['platform'] == platform for target in selected))
+
+    def test_serial_editions_keep_independent_artifacts_for_publication(self):
+        repository = Path(__file__).resolve().parents[2]
+        (self.root / 'Cargo.toml').write_text('[package]\nversion = "1.5.2"\n')
+        artifacts = self.root / 'artifacts'
+        for target in plan.matrix('all')['include']:
+            platform, arch = target['platform'], target['arch']
+            for edition in ('cliente', 'suporte'):
+                mode = '1' if edition == 'cliente' else '0'
+                local_platform = 'macOS' if platform == 'macos' else platform
+                local_arch = 'arm64' if platform == 'macos' and arch == 'aarch64' else arch
+                out = subprocess.check_output([
+                    'bash', '-c', 'source "$1"; export BGDESK_CLIENTE="$2"; bgdesk_build_out_dir "$3" "$4"',
+                    'build-path', str(repository / 'scripts/build-out-dir.sh'), mode, local_platform, local_arch,
+                ], text=True).strip()
+                for fmt, path in collect.specs(platform, arch, edition):
+                    self.assertEqual(path.parent.as_posix(), out)
+                    source = self.root / path
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_bytes(f'{platform}/{arch}/{edition}/{fmt}'.encode())
+                subprocess.run([
+                    sys.executable, str(repository / 'scripts/ci/collect-artifacts.py'),
+                    platform, arch, edition, '--output',
+                    str(artifacts / f'build-{platform}-{arch}-{edition}'),
+                ], cwd=self.root, check=True)
+        records = r2.read_records(artifacts, '1.5.2')
+        self.assertEqual(len(records), 20)
+        for record, path in records:
+            self.assertEqual(path.read_bytes(),
+                             f"{record['platform']}/{record['arch']}/{record['edition']}/{record['format']}".encode())
 
     def test_preflight_rejects_partial_or_non_main_publication(self):
         for platforms, ref in (('windows','refs/heads/main'), ('all','refs/heads/test')):

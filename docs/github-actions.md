@@ -5,7 +5,8 @@ publish**. Cada push na `main` compila cliente e suporte. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
-São dez builds, em máquinas nativas do GitHub:
+São cinco jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
+ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máquina:
 
 - macOS Apple Silicon e Intel: DMGs assinados, notarizados e verificados pelo
   mesmo `build.sh` / `package-macos.sh` usado no Mac local.
@@ -19,6 +20,12 @@ O Rust está fixado em `1.98.0`, usado na validação local. Mac e Windows leem 
 de `scripts/flutter-stable-version`. Os geradores do bridge usam um SDK de
 ferramentas separado para manter compatibilidade com o analyzer do Freezed.
 Há cache de dependências nativas e de camadas Docker; o primeiro build é mais lento.
+Rust, Flutter, vcpkg e as ferramentas de assinatura são preparados uma vez por
+plataforma e arquitetura. As duas edições compartilham downloads e dependências
+compiladas do Cargo; no Linux também usam a mesma imagem e os mesmos volumes
+Docker. Os artefatos de cada edição são guardados separadamente antes de iniciar
+a próxima, sem apagar o cache de compilação entre elas. A publicação continua
+exigindo os vinte arquivos das duas edições em todas as plataformas.
 
 ## Salvar as credenciais
 

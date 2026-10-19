@@ -10,8 +10,7 @@ import tomllib
 
 def specs(platform, arch, edition):
     if platform == "macos":
-        local_arch = "arm64" if arch == "aarch64" else arch
-        return [("dmg", Path(f"build/macOS-{local_arch}-{edition}/bgdesk-{edition}-darwin.dmg"))]
+        return [("dmg", Path(f"build/macOS-{arch}-{edition}/bgdesk-{edition}-darwin.dmg"))]
     if platform == "windows":
         directory = Path(f"build/windows-x86_64-{edition}")
         return [("exe", directory / f"bgdesk-{edition}-update-win64.exe"),

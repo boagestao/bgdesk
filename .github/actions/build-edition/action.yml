@@ -1,0 +1,93 @@
+name: Build one BGDesk edition
+description: Build, sign, and save an edition using the runner's shared toolchain and dependencies
+inputs:
+  platform:
+    description: Target operating system
+    required: true
+  arch:
+    description: Target architecture
+    required: true
+  edition:
+    description: cliente or suporte
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Select edition
+      shell: bash
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: |
+        case "$EDITION" in
+          cliente) echo 'BGDESK_CLIENTE=1' >> "$GITHUB_ENV" ;;
+          suporte) echo 'BGDESK_CLIENTE=0' >> "$GITHUB_ENV" ;;
+          *) echo "Unknown edition: $EDITION" >&2; exit 1 ;;
+        esac
+    - name: Build signed and notarized DMG
+      if: inputs.platform == 'macos'
+      shell: bash
+      run: |
+        args=(mac)
+        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente mac)
+        bash build.sh "${args[@]}"
+    - name: Build Windows app and installer
+      if: inputs.platform == 'windows'
+      shell: bash
+      run: |
+        # Generate bindings for the first edition and reuse them for the second.
+        args=(windows)
+        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente windows --build-bridges)
+        bash build.sh "${args[@]}"
+    - name: Sign Windows app
+      if: inputs.platform == 'windows'
+      shell: pwsh
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/extracted/bgdesk.exe"
+    - name: Rebuild Inno installer containing the signed app
+      if: inputs.platform == 'windows'
+      shell: bash
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: bash installers/build-installer.sh "$EDITION"
+    - name: Sign Windows installer
+      if: inputs.platform == 'windows'
+      shell: pwsh
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-win64.exe"
+    - name: Build native Windows update package
+      if: inputs.platform == 'windows'
+      shell: bash
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: python scripts/ci/package-windows-update.py --edition "$EDITION"
+    - name: Sign native Windows update package
+      if: inputs.platform == 'windows'
+      shell: pwsh
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-update-win64.exe"
+    - name: Build Linux packages in the shared Docker environment
+      if: inputs.platform == 'linux'
+      shell: bash
+      env:
+        ARCH: ${{ inputs.arch }}
+      run: |
+        args=("linux-$ARCH")
+        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente "linux-$ARCH")
+        bash build.sh "${args[@]}"
+    - name: Collect and validate expected artifacts
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        ARCH: ${{ inputs.arch }}
+        EDITION: ${{ inputs.edition }}
+      run: python scripts/ci/collect-artifacts.py "$PLATFORM" "$ARCH" "$EDITION" --output "release-artifacts/$EDITION"
+    - name: Save edition outputs
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: build-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.edition }}
+        path: release-artifacts/${{ inputs.edition }}/*
+        if-no-files-found: error
+        retention-days: 14

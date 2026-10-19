@@ -19,10 +19,9 @@ def matrix(platforms):
         ("linux", "aarch64", "ubuntu-24.04-arm"),
     ]
     return {"include": [
-        dict(platform=platform, arch=arch, runner=runner, edition=edition)
+        dict(platform=platform, arch=arch, runner=runner)
         for platform, arch, runner in targets
         if platforms == "all" or platforms == platform
-        for edition in ("cliente", "suporte")
     ]}
 
 
@@ -77,7 +76,8 @@ def main():
     with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
         for key, value in outputs.items():
             handle.write(f"{key}={value}\n")
-    print(f"BGDesk {version}: {len(matrix(platforms)['include'])} builds; publication={publish}")
+    runners = len(matrix(platforms)['include'])
+    print(f"BGDesk {version}: {runners} runners, {runners * 2} builds (cliente then suporte); publication={publish}")
 
 
 if __name__ == "__main__":

@@ -88,10 +88,10 @@ jobs:
         run: python scripts/ci/r2-publish.py --version '${{ steps.plan.outputs.version }}' --check-only
 
   build:
-    name: ${{ matrix.platform }} / ${{ matrix.arch }} / ${{ matrix.edition }}
+    name: ${{ matrix.platform }} / ${{ matrix.arch }} (cliente + suporte)
     needs: preflight
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 300
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.preflight.outputs.matrix) }}
@@ -120,15 +120,6 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
-      - name: Select edition
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: |
-          if [[ "$EDITION" == cliente ]]; then
-            echo 'BGDESK_CLIENTE=1' >> "$GITHUB_ENV"
-          else
-            echo 'BGDESK_CLIENTE=0' >> "$GITHUB_ENV"
-          fi
       - name: Install Rust
         if: runner.os != 'Linux'
         run: |
@@ -151,15 +142,11 @@ jobs:
           brew install nasm autoconf automake libtool pkg-config
           python -m pip install brotli
           cargo install cargo-expand --version 1.0.95 --locked
-      - name: Build signed and notarized DMG
+      - name: Prepare temporary macOS certificate
         if: runner.os == 'macOS'
         env:
           MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
           MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
-          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
-          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID || '3Z7C3Q7NMT' }}
-          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
-          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           MACOS_P12_FILE: ${{ runner.temp }}/bgdesk-distribution.p12
         run: |
           python - <<'PY'
@@ -169,12 +156,6 @@ jobs:
           target.touch(mode=0o600)
           target.write_bytes(base64.b64decode(os.environ['MACOS_P12_BASE64'], validate=True))
           PY
-          args=(mac)
-          [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente mac)
-          bash build.sh "${args[@]}"
-      - name: Remove temporary macOS certificate
-        if: always() && runner.os == 'macOS'
-        run: rm -f "$RUNNER_TEMP/bgdesk-distribution.p12"
       - name: Install Flutter for Windows
         if: runner.os == 'Windows'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -196,7 +177,7 @@ jobs:
           version: '15.0.6'
           directory: ${{ runner.temp }}/bgdesk-llvm
           env: false
-      - name: Configure and build Windows
+      - name: Configure Windows build environment
         if: runner.os == 'Windows'
         run: |
           export FLUTTER_DIR="$(cygpath -u "$FLUTTER_ROOT")"
@@ -207,35 +188,6 @@ jobs:
           export FLUTTER_VERSION="$(sed '/^#/d; /^$/d' scripts/flutter-stable-version | tail -1)"
           bash scripts/setup-windows-build.sh --skip-vs
           bash .github/patches/apply_flutter_3.44_source_patches.sh
-          args=(windows --build-bridges)
-          [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente windows --build-bridges)
-          bash build.sh "${args[@]}"
-      - name: Sign Windows app
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: |
-          ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/extracted/bgdesk.exe"
-      - name: Rebuild Inno installer containing the signed app
-        if: runner.os == 'Windows'
-        run: bash installers/build-installer.sh '${{ matrix.edition }}'
-      - name: Sign Windows installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: |
-          ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-win64.exe"
-      - name: Build native Windows update package
-        if: runner.os == 'Windows'
-        run: python scripts/ci/package-windows-update.py --edition '${{ matrix.edition }}'
-      - name: Sign native Windows update package
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          EDITION: ${{ matrix.edition }}
-        run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-update-win64.exe"
       - name: Set up Linux image cache
         if: runner.os == 'Linux'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -249,21 +201,35 @@ jobs:
           load: true
           cache-from: type=gha,scope=linux-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=linux-${{ matrix.arch }}
-      - name: Build Linux packages in the existing Docker environment
-        if: runner.os == 'Linux'
-        run: |
-          args=(linux-${{ matrix.arch }})
-          [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente linux-${{ matrix.arch }})
-          bash build.sh "${args[@]}"
-      - name: Collect and validate expected artifacts
-        run: python scripts/ci/collect-artifacts.py '${{ matrix.platform }}' '${{ matrix.arch }}' '${{ matrix.edition }}'
-      - name: Save build outputs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Build, sign, and save cliente
+        uses: ./.github/actions/build-edition
         with:
-          name: build-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.edition }}
-          path: release-artifacts/*
-          if-no-files-found: error
-          retention-days: 14
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          edition: cliente
+        env:
+          MACOS_P12_FILE: ${{ runner.temp }}/bgdesk-distribution.p12
+          MACOS_P12_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_P12_PASSWORD || '' }}
+          MACOS_CODESIGN_IDENTITY: ${{ runner.os == 'macOS' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
+          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID || '3Z7C3Q7NMT' }}
+          MACOS_NOTARY_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          MACOS_NOTARY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_PASSWORD || '' }}
+      - name: Build, sign, and save suporte
+        uses: ./.github/actions/build-edition
+        with:
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          edition: suporte
+        env:
+          MACOS_P12_FILE: ${{ runner.temp }}/bgdesk-distribution.p12
+          MACOS_P12_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_P12_PASSWORD || '' }}
+          MACOS_CODESIGN_IDENTITY: ${{ runner.os == 'macOS' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
+          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID || '3Z7C3Q7NMT' }}
+          MACOS_NOTARY_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          MACOS_NOTARY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_PASSWORD || '' }}
+      - name: Remove temporary macOS certificate
+        if: always() && runner.os == 'macOS'
+        run: rm -f "$RUNNER_TEMP/bgdesk-distribution.p12"
 
   publish:
     needs: [preflight, build]
