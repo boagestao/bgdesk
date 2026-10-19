@@ -1183,7 +1183,8 @@ def build_flutter_dmg(version, features):
     elif use_flutter_stable():
         system2(f'{flutter} pub get')
     system2(
-        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES {flutter} build macos --release{local_flags}')
+        f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES '
+        f'FLUTTER_XCODE_CODE_SIGNING_ALLOWED=NO {flutter} build macos --release{local_flags}')
     write_flutter_build_stamp()
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/BGDesk.app/Contents/MacOS/')
     '''

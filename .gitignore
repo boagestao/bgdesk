@@ -56,6 +56,11 @@ libsciter.dylib
 flutter/web/
 flutter/pubspec.lock
 scripts/windows-build-env.local.sh
+# Senha e arquivo do certificado de assinatura macOS. Nunca versionar.
+.env
+*.p12
+*.cer
+*.certSigningRequest
 # Flutter SDK, depot_tools e downloads de toolchain (não versionar)
 .tools/
 # libdrmtap is cloned at build time by build.py (not a submodule)

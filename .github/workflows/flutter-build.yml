@@ -852,6 +852,10 @@ jobs:
 
       - name: Codesign app and create signed dmg
         if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+          DMG_PATH: bgdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg
         run: |
           # Patch create-dmg to give more attempts to unmount image
           CREATE_DMG="$(command -v create-dmg)"
@@ -859,30 +863,26 @@ jobs:
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
           # Unlock keychain
           security default-keychain -s rustdesk.keychain
-          security unlock-keychain -p ${{ secrets.MACOS_P12_PASSWORD }} rustdesk.keychain
+          security unlock-keychain -p "$MACOS_P12_PASSWORD" rustdesk.keychain
           # start sign the rustdesk.app and dmg
           rm -rf *.dmg || true
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/BGDesk.app -vvv
-          create-dmg --icon "BGDesk.app" 200 190 --hide-extension "BGDesk.app" --window-size 800 400 --app-drop-link 600 185 bgdesk-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/BGDesk.app
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict bgdesk-${{ env.VERSION }}.dmg -vvv
-          # notarize the bgdesk-${{ env.VERSION }}.dmg
-          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple bgdesk-${{ env.VERSION }}.dmg
-
-      - name: Rename rustdesk
-        if: env.UPLOAD_ARTIFACT == 'true'
-        run: |
-          for name in rustdesk*??.dmg; do
-              mv "$name" "${name%%.dmg}-${{ matrix.job.arch }}.dmg"
-          done
+          bash .github/scripts/sign-macos-app.sh ./flutter/build/macos/Build/Products/Release/BGDesk.app "$MACOS_CODESIGN_IDENTITY" flutter/macos/Runner/Release.entitlements
+          codesign --verify --deep --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "3Z7C3Q7NMT" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists' ./flutter/build/macos/Build/Products/Release/BGDesk.app
+          create-dmg --icon "BGDesk.app" 200 190 --hide-extension "BGDesk.app" --window-size 800 400 --app-drop-link 600 185 "$DMG_PATH" ./flutter/build/macos/Build/Products/Release/BGDesk.app
+          codesign --force --timestamp -s "$MACOS_CODESIGN_IDENTITY" --identifier br.com.boagestao.bgdesk.diskimage "$DMG_PATH" -vvv
+          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json --staple "$DMG_PATH"
+          codesign --verify --strict "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
 
       - name: Publish DMG package
-        if: env.UPLOAD_ARTIFACT == 'true'
+        if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            rustdesk*-${{ matrix.job.arch }}.dmg
+            bgdesk*-${{ matrix.job.arch }}.dmg
 
   publish_unsigned:
     needs:

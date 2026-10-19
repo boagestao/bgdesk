@@ -63,9 +63,9 @@ Plataformas:
 
 Modos:
   cliente             Build somente conexões recebidas (feature incoming-only).
-                      Artefatos: bgdesk-cliente-*.{deb,rpm,AppImage,darwin.zip,win64.exe}
+                      Artefatos: bgdesk-cliente-*.{deb,rpm,AppImage,darwin.dmg,win64.exe}
   (padrão)            Build completo (suporte).
-                      Artefatos: bgdesk-suporte-*.{deb,rpm,AppImage,darwin.zip,win64.exe}
+                      Artefatos: bgdesk-suporte-*.{deb,rpm,AppImage,darwin.dmg,win64.exe}
 
 Opções:
   --build-bridges     Regenera o flutter-rust-bridge.
@@ -76,6 +76,8 @@ Opções:
                       flutter build e pacotes). Não regenera o bridge.
   --rebuild-image     Reconstrói a imagem Docker do build Linux.
   --flutter           Reinstala o Flutter stable pinado (macOS).
+  --macos-local       Assina para testes locais, sem notarização. O DMG recebe
+                      o sufixo -local e não é uma versão para distribuição.
   --help, -h, help    Mostra esta ajuda.
 
 Exemplos:
@@ -97,6 +99,9 @@ Notas:
   - Artefatos ficam em build/<plataforma>-<arch>-<modo>/ (ex.: build/linux-aarch64-cliente/).
   - Windows: gera instalador Inno Setup (bgdesk-suporte-win64.exe /
     bgdesk-cliente-win64.exe) se ISCC estiver instalado.
+  - macOS: lê o .env da raiz (ignorado pelo git) com o caminho do .p12
+    e a senha. O arquivo não é copiado nem movido. Exige Developer ID Application
+    e notarização. Configuração: docs/macos-signing.md.
 EOF
 }
 
@@ -105,6 +110,7 @@ BGDESK_CLIENTE=0
 FORCE_REBUILD=0
 REBUILD_IMAGE=0
 BUILD_BRIDGES=0
+MACOS_LOCAL=0
 SHOW_HELP=0
 REMAINING_ARGS=()
 for arg in "$@"; do
@@ -115,6 +121,7 @@ for arg in "$@"; do
     --force|-f|force) FORCE_REBUILD=1 ;;
     --rebuild-image) REBUILD_IMAGE=1 ;;
     --build-bridges) BUILD_BRIDGES=1 ;;
+    --macos-local) MACOS_LOCAL=1 ;;
     *) REMAINING_ARGS+=("$arg") ;;
   esac
 done
@@ -401,6 +408,12 @@ ensure_macos_vcpkg() {
 
 buildMac()
 {
+    local PACKAGE_ARGS=()
+    if [[ "$MACOS_LOCAL" == "1" ]]; then
+      PACKAGE_ARGS+=(--local)
+    fi
+    # Check credentials before compiling or replacing the previous artifacts.
+    bash "$ROOT/scripts/package-macos.sh" ${PACKAGE_ARGS[@]+"${PACKAGE_ARGS[@]}"} --check
     ensure_cargo
     export VCPKG_ROOT="${VCPKG_ROOT:-$HOME/.bin/vcpkg}"
     if [[ "$ARCH" == "arm64" ]]; then
@@ -425,27 +438,24 @@ buildMac()
     $PYTHON build.py "${BUILD_ARGS[@]}"
     STAMP_SRC="build/flutter-build-stamp.txt"
     [[ -f "$STAMP_SRC" ]] || STAMP_SRC="flutter/build/flutter-build-stamp.txt"
-    if [[ -f "$STAMP_SRC" ]]; then
-      mkdir -p flutter/build/macos/Build/Products/Release/BGDesk.app/Contents/Resources
-      cp "$STAMP_SRC" \
-        flutter/build/macos/Build/Products/Release/BGDesk.app/Contents/Resources/flutter-build-stamp.txt
-    fi
     mv flutter/build/macos/Build/Products/Release/BGDesk.app "$MAC_OUT_DIR/BGDesk.app"
     if [[ -f "$STAMP_SRC" ]]; then
       mkdir -p "$MAC_OUT_DIR/BGDesk.app/Contents/Resources"
       cp "$STAMP_SRC" "$MAC_OUT_DIR/BGDesk.app/Contents/Resources/flutter-build-stamp.txt"
       cp "$STAMP_SRC" "$MAC_OUT_DIR/flutter-build-stamp.txt"
     fi
-    local ZIP_NAME
+    local DMG_NAME
     if [[ "$BGDESK_CLIENTE" == "1" ]]; then
-      ZIP_NAME="bgdesk-cliente-darwin.zip"
+      DMG_NAME="bgdesk-cliente-darwin.dmg"
     else
-      ZIP_NAME="bgdesk-suporte-darwin.zip"
+      DMG_NAME="bgdesk-suporte-darwin.dmg"
     fi
-    (
-      cd "$MAC_OUT_DIR"
-      zip -vr "$ZIP_NAME" BGDesk.app
-    )
+    if [[ "$MACOS_LOCAL" == "1" ]]; then
+      DMG_NAME="${DMG_NAME%.dmg}-local.dmg"
+    fi
+    # All bundle resources are in place before the final signature is created.
+    bash "$ROOT/scripts/package-macos.sh" ${PACKAGE_ARGS[@]+"${PACKAGE_ARGS[@]}"} \
+      "$MAC_OUT_DIR/BGDesk.app" "$MAC_OUT_DIR/$DMG_NAME"
     echo ""
     echo "=== Build macOS concluído ==="
     echo "Pasta: $ROOT/$MAC_OUT_DIR/"
