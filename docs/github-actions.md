@@ -60,6 +60,9 @@ Secrets utilizados:
   de app** para notarização. O perfil local `MACOS_NOTARY_PROFILE` do Keychain
   não existe nos runners. A verificação `bash scripts/package-macos.sh --check`
   confirma autenticação e certificado antes de compilar.
+  A checagem também assina e verifica um executável mínimo para confirmar acesso
+  à chave privada. O Keychain temporário entra na lista de busca durante a
+  assinatura; a lista original é restaurada ao final, inclusive em caso de erro.
 - `BGDESK_UPDATE_SIGNING_KEY`: conteúdo JSON da chave privada Ed25519 existente.
   O preflight confere se corresponde à chave pública do código.
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: credenciais S3 do R2, com permissão

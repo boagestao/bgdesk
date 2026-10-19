@@ -30,6 +30,8 @@ tmp_keychain=""
 tmp_keychain_dir=""
 work_dir=""
 mounted=0
+original_keychains=()
+keychain_search_changed=0
 
 cleanup() {
   if [[ "$mounted" == "1" ]]; then
@@ -43,6 +45,11 @@ cleanup() {
     rm -rf "$work_dir"
   fi
   if [[ -n "$tmp_keychain" ]]; then
+    if [[ "$keychain_search_changed" == "1" ]]; then
+      security list-keychains -d user -s ${original_keychains[@]+"${original_keychains[@]}"} >/dev/null 2>&1 || \
+        echo "[macOS] Não foi possível restaurar a lista de Keychains." >&2
+      keychain_search_changed=0
+    fi
     security delete-keychain "$tmp_keychain" >/dev/null 2>&1 || true
     tmp_keychain=""
   fi
@@ -88,7 +95,7 @@ prepare_external_p12() {
   [[ -n "${MACOS_P12_FILE:-}" ]] || return 0
   [[ -n "${MACOS_P12_PASSWORD:-}" ]] || \
     fail "Defina MACOS_P12_PASSWORD no .env da raiz. Esse arquivo é ignorado pelo Git."
-  local p12_real root_real parent parent_real keychain_password
+  local p12_real root_real parent parent_real keychain_password keychain keychain_list
   p12_real="$(realpath_of "$MACOS_P12_FILE")"
   root_real="$(realpath_of "$ROOT")"
   case "$p12_real" in
@@ -104,10 +111,18 @@ prepare_external_p12() {
   esac
   tmp_keychain_dir="$(mktemp -d "$parent/bgdesk-signing.XXXXXX")"
   tmp_keychain="$tmp_keychain_dir/signing.keychain-db"
+  keychain_list="$(security list-keychains -d user)"
+  while IFS= read -r keychain; do
+    [[ -z "$keychain" ]] || original_keychains+=("$keychain")
+  done < <(printf '%s\n' "$keychain_list" | python3 -c 'import shlex, sys; print("\n".join(shlex.split(sys.stdin.read())))')
   keychain_password="$(openssl rand -base64 32)"
   security create-keychain -p "$keychain_password" "$tmp_keychain"
   security set-keychain-settings -lut 21600 "$tmp_keychain"
   security unlock-keychain -p "$keychain_password" "$tmp_keychain"
+  # Register the imported keychain for codesign's identity/private-key lookup,
+  # as required on fresh CI runners. Preserve the user's existing search list.
+  keychain_search_changed=1
+  security list-keychains -d user -s "$tmp_keychain" ${original_keychains[@]+"${original_keychains[@]}"}
   if ! security import "$p12_real" -k "$tmp_keychain" -P "$MACOS_P12_PASSWORD" \
       -T /usr/bin/codesign -T /usr/bin/security >/dev/null; then
     fail "Não foi possível abrir o .p12. Confira MACOS_P12_PASSWORD. O arquivo não foi copiado nem movido."
@@ -188,7 +203,19 @@ if [[ "$local_build" == "0" && "$identity" != "-" ]]; then
 else
   echo "[macOS] Identidade: $identity; equipe: $team_id."
 fi
-[[ "$check_only" == "0" ]] || exit 0
+if [[ "$check_only" == "1" ]]; then
+  # Finding a certificate is insufficient: exercise private-key access before
+  # spending time compiling the application on a fresh runner.
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/bgdesk-codesign-check.XXXXXX")"
+  printf 'int main(void) { return 0; }\n' | xcrun clang -x c - -o "$work_dir/probe"
+  probe_args=(--force --options runtime --sign "$identity")
+  [[ -z "${MACOS_CODESIGN_KEYCHAIN:-}" ]] || probe_args+=(--keychain "$MACOS_CODESIGN_KEYCHAIN")
+  [[ "$identity" == "-" ]] || probe_args+=(--timestamp)
+  codesign "${probe_args[@]}" "$work_dir/probe"
+  codesign --verify --strict "$work_dir/probe"
+  echo "[macOS] Assinatura de teste validada."
+  exit 0
+fi
 
 app_path=$1
 [[ -d "$app_path/Contents/MacOS" ]] || fail "App não encontrado: $app_path"

@@ -326,6 +326,10 @@ touch "${@: -1}"
         )
         env = self.fake_tool("security", '''
 printf '%s\\n' "$*" >> "$TEST_SECURITY_LOG"
+if [[ "$1" == "list-keychains" && "$#" == 3 ]]; then
+  echo '    "/original keychains/login.keychain-db"'
+  echo '    "/original/system.keychain-db"'
+fi
 if [[ "$1" == "find-identity" ]]; then
   echo '  1) 1111111111111111111111111111111111111111 "Developer ID Application: Test (3Z7C3Q7NMT)"'
 fi
@@ -339,6 +343,7 @@ if [[ "$1" == "--find" || "$1 $2" == "notarytool history" ]]; then
 fi
 exit 0
 ''')
+        self.fake_tool("codesign", 'exit "${TEST_SIGNATURE_PROBE_EXIT:-0}"')
         env.pop("MACOS_CODESIGN_IDENTITY")
         env["BGDESK_DOTENV_FILE"] = str(dotenv)
         env["TEST_SECURITY_LOG"] = str(self.base / "security.log")
@@ -347,7 +352,14 @@ exit 0
         self.assertIn(str(p12), result.stdout)
         log = (self.base / "security.log").read_text()
         self.assertIn("import " + os.path.realpath(p12), log)
+        restore = 'list-keychains -d user -s /original keychains/login.keychain-db /original/system.keychain-db'
+        self.assertIn(restore, log)
+        self.assertIn('Assinatura de teste validada', result.stdout)
         self.assertEqual(p12.read_bytes(), b"arquivo-original")
+        # A private-key access failure must also restore the original search list.
+        env['TEST_SIGNATURE_PROBE_EXIT'] = '42'
+        self.run_command(["bash", PACKAGE, "--check"], env=env, ok=False)
+        self.assertEqual((self.base / "security.log").read_text().count(restore), 2)
 
     def test_imported_distribution_certificate_is_rejected(self):
         certificate_dir = self.base / "Certificados"

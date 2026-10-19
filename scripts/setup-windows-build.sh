@@ -12,7 +12,7 @@
 # vcpkg + dependências do projeto, Flutter 3.44.x e PATH no ~/.bashrc.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # Alinhado com build.sh / CI (.github/workflows/flutter-build.yml)
@@ -63,11 +63,6 @@ done
 if [[ "$SHOW_HELP" == "1" ]]; then
   usage
   exit 0
-fi
-
-if [[ "$(uname -s)" != MINGW* ]] && [[ "$(uname -s)" != MSYS* ]] && [[ "$(uname -s)" != CYGWIN* ]]; then
-  echo "[setup] ERRO: este script é somente para Windows (Git Bash / MSYS)." >&2
-  exit 1
 fi
 
 log() { echo "[setup] $*"; }
@@ -247,39 +242,48 @@ install_vcpkg_dependencies() {
 }
 
 flutter_installed_version_ok() {
-  [[ -x "$FLUTTER_DIR/bin/flutter.bat" ]] || return 1
+  [[ -f "$FLUTTER_DIR/bin/flutter.bat" && -f "$FLUTTER_DIR/bin/flutter" ]] || return 1
   local ver
-  ver="$("$FLUTTER_DIR/bin/flutter.bat" --version 2>/dev/null | head -1 || true)"
-  [[ "$ver" == *"$FLUTTER_VERSION"* ]]
+  # Windows ZIP entries need not have a POSIX executable bit. Flutter's Bash
+  # launcher delegates to flutter.bat on Windows and handles SDK paths safely.
+  # Inspect all output: the first invocation can print bootstrap messages first.
+  ver="$(bash "$FLUTTER_DIR/bin/flutter" --version 2>/dev/null)" || return 1
+  [[ "$ver" == *"Flutter $FLUTTER_VERSION "* ]]
 }
 
 install_flutter() {
   if [[ "$REINSTALL_FLUTTER" == "1" ]] || ! flutter_installed_version_ok; then
-    if [[ -d "$FLUTTER_DIR" ]]; then
-      log "removendo Flutter antigo em $FLUTTER_DIR ..."
-      cmd //c "rmdir /s /q \"$(to_windows_path "$FLUTTER_DIR")\"" 2>/dev/null || rm -rf "$FLUTTER_DIR" || true
-    fi
     mkdir -p "$TEMP_DIR"
     local archive="flutter_windows_${FLUTTER_VERSION}-stable.zip"
     local url="https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/${archive}"
     local zip="$TEMP_DIR/$archive"
     log "baixando Flutter $FLUTTER_VERSION ..."
-    curl -L -o "$zip" "$url"
-    mkdir -p "$(dirname "$FLUTTER_DIR")"
-    unzip -q "$zip" -d "$(dirname "$FLUTTER_DIR")"
-    if [[ -d "$(dirname "$FLUTTER_DIR")/flutter" && "$FLUTTER_DIR" != "$(dirname "$FLUTTER_DIR")/flutter" ]]; then
-      mv "$(dirname "$FLUTTER_DIR")/flutter" "$FLUTTER_DIR"
+    curl -fL -o "$zip" "$url"
+    local extracted
+    extracted="$(mktemp -d "$TEMP_DIR/flutter.XXXXXX")"
+    if ! unzip -q "$zip" -d "$extracted"; then
+      rm -rf "$extracted"
+      die "Não foi possível extrair o SDK Flutter."
     fi
+    if [[ ! -f "$extracted/flutter/bin/flutter.bat" || ! -f "$extracted/flutter/bin/flutter" ]]; then
+      rm -rf "$extracted"
+      die "O arquivo baixado não contém um SDK Flutter Windows completo."
+    fi
+    mkdir -p "$(dirname "$FLUTTER_DIR")"
+    rm -rf "$FLUTTER_DIR"
+    mv "$extracted/flutter" "$FLUTTER_DIR"
+    rmdir "$extracted"
+    rm -f "$zip"
   else
     log "Flutter $FLUTTER_VERSION já presente em $FLUTTER_DIR"
   fi
-  [[ -x "$FLUTTER_DIR/bin/flutter.bat" ]] || die "Flutter não encontrado em $FLUTTER_DIR"
+  flutter_installed_version_ok || die "Flutter $FLUTTER_VERSION não encontrado em $FLUTTER_DIR"
   export PATH="$FLUTTER_DIR/bin:$PATH"
   export FLUTTER_ROOT="$FLUTTER_DIR"
-  "$FLUTTER_DIR/bin/flutter.bat" config --no-analytics
+  bash "$FLUTTER_DIR/bin/flutter" config --no-analytics
   log "flutter precache --windows ..."
-  "$FLUTTER_DIR/bin/flutter.bat" precache --windows
-  log "Flutter: $("$FLUTTER_DIR/bin/flutter.bat" --version 2>/dev/null | head -1)"
+  bash "$FLUTTER_DIR/bin/flutter" precache --windows
+  log "Flutter: $(bash "$FLUTTER_DIR/bin/flutter" --version 2>/dev/null)"
 }
 
 configure_shell_path() {
@@ -347,14 +351,17 @@ verify_setup() {
   command -v git >/dev/null 2>&1 || die "git ausente"
   command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 || die "python ausente"
   [[ -x "$VCPKG_ROOT/vcpkg.exe" ]] || die "vcpkg ausente em $VCPKG_ROOT"
-  [[ -x "$FLUTTER_DIR/bin/flutter.bat" ]] || die "flutter ausente em $FLUTTER_DIR"
+  [[ -f "$FLUTTER_DIR/bin/flutter.bat" ]] || die "flutter ausente em $FLUTTER_DIR"
   verify_libclang
 
   log "verificação final: flutter doctor (resumo)"
-  "$FLUTTER_DIR/bin/flutter.bat" doctor -v 2>&1 | head -30 || true
+  bash "$FLUTTER_DIR/bin/flutter" doctor -v 2>&1 | head -30 || true
 }
 
 main() {
+  if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
+    die "este script é somente para Windows (Git Bash / MSYS)."
+  fi
   log "preparando ambiente Windows para ./build.sh"
   log "repositório: $ROOT"
   mkdir -p "$TEMP_DIR"
@@ -380,4 +387,6 @@ main() {
   echo "  FLUTTER_ROOT=$FLUTTER_DIR"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
