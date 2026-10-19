@@ -11,6 +11,7 @@ import subprocess
 import base64
 import gzip
 import tarfile
+import re
 
 import config_archive
 
@@ -48,6 +49,16 @@ class FakeS3:
 
 
 class ReleaseToolsTests(unittest.TestCase):
+    def test_native_builds_use_the_manifest_vcpkg_baseline(self):
+        root = Path(__file__).resolve().parents[2]
+        baseline = json.loads((root / 'vcpkg.json').read_text())['vcpkg-configuration']['default-registry']['baseline']
+        for name in ('.github/workflows/release.yml', 'build.sh', 'scripts/setup-windows-build.sh',
+                     'docker/build-linux-x86_64.dockerfile', 'docker/build-linux-aarch64.dockerfile'):
+            with self.subTest(file=name):
+                pins = re.findall(r'(?:VCPKG_COMMIT_ID|vcpkg_commit)[^\n]*?([0-9a-f]{40})',
+                                  (root / name).read_text())
+                self.assertEqual(pins, [baseline])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

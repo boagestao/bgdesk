@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Alinhado com build.sh / CI (.github/workflows/flutter-build.yml)
-VCPKG_COMMIT_ID="${VCPKG_COMMIT_ID:-120deac3062162151622ca4860575a33844ba10b}"
+VCPKG_COMMIT_ID="${VCPKG_COMMIT_ID:-9e593bb18ea69cc5095e012465dcd675a822ed0d}"
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.44.4}"
 VCPKG_TRIPLET="${VCPKG_TRIPLET:-x64-windows-static}"
 VCPKG_ROOT="${VCPKG_ROOT:-$HOME/.bin/vcpkg}"
@@ -223,7 +223,9 @@ install_vcpkg() {
   fi
   if [[ ! -x "$VCPKG_ROOT/vcpkg.exe" ]]; then
     log "bootstrap vcpkg..."
-    cmd //c "\"$(to_windows_path "$VCPKG_ROOT")\\bootstrap-vcpkg.bat\" -disableMetrics"
+    # Run the batch file from its directory so cmd receives no quoted executable path.
+    # Disable MSYS argument conversion for cmd's /d and /c switches.
+    (cd "$VCPKG_ROOT" && MSYS_NO_PATHCONV=1 cmd.exe /d /c bootstrap-vcpkg.bat -disableMetrics)
   fi
   [[ -x "$VCPKG_ROOT/vcpkg.exe" ]] || die "vcpkg.exe não encontrado em $VCPKG_ROOT"
 }

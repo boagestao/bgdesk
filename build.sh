@@ -410,7 +410,7 @@ setup_macos_flutter_stable() {
 
 ensure_macos_vcpkg() {
   export VCPKG_ROOT="${VCPKG_ROOT:-$HOME/.bin/vcpkg}"
-  local vcpkg_commit="120deac3062162151622ca4860575a33844ba10b"
+  local vcpkg_commit="9e593bb18ea69cc5095e012465dcd675a822ed0d"
   if [[ ! -x "$VCPKG_ROOT/vcpkg" ]]; then
     echo "[build] instalando vcpkg em $VCPKG_ROOT..."
     mkdir -p "$(dirname "$VCPKG_ROOT")"
