@@ -10,18 +10,30 @@ import tomllib
 import config_archive
 
 
-def matrix(platforms):
-    targets = [
-        ("macos", "aarch64", "macos-15"),
-        ("macos", "x86_64", "macos-15-intel"),
-        ("windows", "x86_64", "windows-2022"),
-        ("linux", "x86_64", "ubuntu-24.04"),
-        ("linux", "aarch64", "ubuntu-24.04-arm"),
-    ]
+TARGETS = [
+    ("macos", "aarch64", "macos-15"),
+    ("macos", "x86_64", "macos-15-intel"),
+    ("windows", "x86_64", "windows-2022"),
+    ("linux", "x86_64", "ubuntu-24.04"),
+    ("linux", "aarch64", "ubuntu-24.04-arm"),
+]
+
+# Hold Linux, Windows, and macOS Intel until Apple Silicon signs and notarizes.
+ENABLED_TARGETS = {("macos", "aarch64")}
+
+
+def distribution_matrix(platforms):
     return {"include": [
         dict(platform=platform, arch=arch, runner=runner)
-        for platform, arch, runner in targets
+        for platform, arch, runner in TARGETS
         if platforms == "all" or platforms == platform
+    ]}
+
+
+def matrix(platforms):
+    return {"include": [
+        target for target in distribution_matrix(platforms)["include"]
+        if (target["platform"], target["arch"]) in ENABLED_TARGETS
     ]}
 
 
@@ -32,6 +44,16 @@ def main():
         raise SystemExit("Publishing requires all platforms, so an edition cannot lose artifacts.")
     if publish and os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise SystemExit("Publication is allowed only from main; use publish=false to validate another branch")
+    active = matrix(platforms)["include"]
+    if not active:
+        raise SystemExit(
+            "Only macos/aarch64 is enabled until that build succeeds; "
+            f"no jobs match platforms={platforms}"
+        )
+    full = {(platform, arch) for platform, arch, _runner in TARGETS}
+    if publish and {(item["platform"], item["arch"]) for item in active} != full:
+        print("Publication skipped until macos/aarch64 succeeds and the other runners are enabled again.")
+        publish = False
     origin = os.environ.get("BGDESK_UPDATE_ORIGIN", "https://bgdesk.com")
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+", origin):
         raise SystemExit("Update origin must be HTTPS, with no path or trailing slash")

@@ -5,8 +5,14 @@ publish**. Cada push na `main` compila cliente e suporte. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
-São cinco jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
-ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máquina:
+Enquanto o job macOS Apple Silicon não terminar com sucesso, Linux, Windows e
+macOS Intel ficam fora da matriz. Nesse estado o push na `main` só dispara
+`macos / aarch64` e não publica, para um conjunto incompleto não substituir o
+`latest.json`. A publicação continua exigindo os vinte arquivos das duas edições.
+
+São cinco jobs paralelos, em máquinas nativas do GitHub, quando a matriz completa
+está ligada. Cada job prepara o ambiente uma vez e compila primeiro o cliente,
+depois o suporte, na mesma máquina:
 
 - macOS Apple Silicon e Intel: DMGs assinados, notarizados e verificados pelo
   mesmo `build.sh` / `package-macos.sh` usado no Mac local.

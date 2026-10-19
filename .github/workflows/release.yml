@@ -54,6 +54,7 @@ jobs:
       - name: Validate credentials and build plan
         id: plan
         env:
+          # preflight keeps only macos/aarch64 until that job succeeds; publication stays off.
           BUILD_PLATFORMS: ${{ inputs.platforms || 'all' }}
           PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
           BGDESK_CONFIG_SSH_KEY: ${{ secrets.BGDESK_CONFIG_SSH_KEY }}
