@@ -2,7 +2,8 @@ FROM ubuntu:22.04
 
 WORKDIR /root
 ARG DEBIAN_FRONTEND=noninteractive
-ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+# Let the pinned vcpkg acquire its required CMake/Ninja versions. Ubuntu 22.04's
+# CMake lacks JSON STRING_ENCODE, which the registry's SPDX generation uses.
 ENV VCPKG_ROOT=/vcpkg
 ENV VCPKG_TRIPLET=x64-linux
 ENV DEB_ARCH=amd64
