@@ -10,7 +10,7 @@ ENV CARGO_INCREMENTAL=0
 ENV PUB_CACHE=/root/.pub-cache
 ENV PATH="/opt/flutter-elinux/bin:/opt/flutter-elinux/flutter/bin:/root/.cargo/bin:${PATH}"
 
-ARG RUST_VERSION=1.75.0
+ARG RUST_VERSION=1.98.0
 ARG FLUTTER_VERSION=3.29.3
 # flutter-elinux has no tag >= 3.29; main tracks Flutter 3.29.3 + matching elinux engine.
 ARG FLUTTER_ELINUX_REF=cdc9622651ee7b217697258cd5ca0b8963f1d6a4
@@ -63,12 +63,19 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
         zsync \
         xz-utils \
     # Project builds opus via vcpkg; system libopus-dev conflicts.
-    && apt-get remove -y libopus-dev || true \
+    && apt-get remove -y libopus-dev \
     && rm -rf /var/lib/apt/lists/* \
     && git config --global --add safe.directory /opt/flutter-elinux \
     && git config --global --add safe.directory /opt/flutter-elinux/flutter \
     && git config --global --add safe.directory /root/bgdesk \
     && mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+# vcpkg-tool-meson needs Ninja >= 1.12.1 on both architectures.
+RUN wget -qO /tmp/ninja-linux.zip \
+        "https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux-aarch64.zip" \
+    && unzip -q /tmp/ninja-linux.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/ninja \
+    && rm /tmp/ninja-linux.zip
 
 # --- Rust toolchain + codegen tools ---
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_VERSION}" \
@@ -103,9 +110,10 @@ RUN pip3 install --no-cache-dir "setuptools_scm<10" \
 # --- project vcpkg deps (baked into the image; only invalidated when manifests change) ---
 COPY vcpkg.json /tmp/bgdesk-vcpkg/vcpkg.json
 COPY res/vcpkg /tmp/bgdesk-vcpkg/res/vcpkg
+COPY res/vcpkg-triplets /tmp/bgdesk-vcpkg/res/vcpkg-triplets
 RUN cd /tmp/bgdesk-vcpkg \
     && "${VCPKG_ROOT}/vcpkg" install \
-        --triplet "${VCPKG_TRIPLET}" \
+        --triplet "${VCPKG_TRIPLET}" --clean-after-build \
         --x-install-root="${VCPKG_ROOT}/installed" \
     && rm -rf /tmp/bgdesk-vcpkg \
         "${VCPKG_ROOT}/buildtrees" \

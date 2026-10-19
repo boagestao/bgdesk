@@ -1014,53 +1014,7 @@ pub fn check_software_update() {
     }
 }
 
-pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String> {
-    let url = url::Url::parse(update_url)?;
-    if url.scheme() != "https" || url.host_str() != Some("github.com") {
-        bail!(
-            "Update URL is not a GitHub HTTPS release URL: {}",
-            update_url
-        );
-    }
-    if url_has_explicit_port(update_url)
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        bail!(
-            "Update URL must not contain credentials or an explicit port: {}",
-            update_url
-        );
-    }
-    if url.query().is_some() || url.fragment().is_some() {
-        bail!(
-            "Update URL must not contain query or fragment: {}",
-            update_url
-        );
-    }
-
-    let Some(segments) = url.path_segments() else {
-        bail!("Update URL has no path: {}", update_url);
-    };
-    let segments = segments.collect::<Vec<_>>();
-    let release_id = match segments.as_slice() {
-        ["boagestao", "bgdesk", "releases", "tag", release_id] => *release_id,
-        ["boagestao", "bgdesk", "releases", "tag", release_id, ""] => *release_id,
-        _ => bail!(
-            "Update URL is not a BGDesk release tag URL: {}",
-            update_url
-        ),
-    };
-    if release_id.is_empty()
-        || release_id == "."
-        || release_id == ".."
-        || release_id.contains([' ', '/', '\\', '?', '#'])
-        || release_id.contains('%')
-    {
-        bail!("Update URL has no release id: {}", update_url);
-    }
-    Ok(release_id.to_owned())
-}
+pub(crate) use crate::update_source::{display_version_from_release_id, release_id_from_update_url};
 
 pub(crate) fn url_has_explicit_port(raw_url: &str) -> bool {
     let Some((_, rest)) = raw_url.split_once("://") else {
@@ -1074,24 +1028,6 @@ pub(crate) fn url_has_explicit_port(raw_url: &str) -> bool {
     host_port.rsplit_once(':').is_some()
 }
 
-pub(crate) fn display_version_from_release_id(release_id: &str) -> ResultType<String> {
-    let display_version = release_id.strip_prefix('v').unwrap_or(release_id);
-    let segments = display_version.split('.').collect::<Vec<_>>();
-    if segments.len() != 3
-        || segments.iter().any(|segment| {
-            segment.is_empty()
-                || !segment.chars().all(|c| c.is_ascii_digit())
-                || segment.parse::<u16>().is_err()
-        })
-    {
-        bail!("Release id is not a stable display version: {}", release_id);
-    }
-    if get_version_number(display_version) <= 0 {
-        bail!("Release id has invalid display version: {}", release_id);
-    }
-    Ok(display_version.to_owned())
-}
-
 fn clear_software_update_url() {
     let mut update_url = SOFTWARE_UPDATE_URL.lock().unwrap();
     *update_url = String::new();
@@ -1100,6 +1036,10 @@ fn clear_software_update_url() {
 fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
     let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
     let response_url = resp.url;
+    if response_url.is_empty() {
+        clear_software_update_url();
+        return Ok(());
+    }
     let release_id = release_id_from_update_url(&response_url)?;
     let latest_release_version = display_version_from_release_id(&release_id)?;
 
@@ -1120,26 +1060,35 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
     Ok(())
 }
 
-// No need to check `danger_accept_invalid_cert` for now.
-// Because the url is always `https://api.rustdesk.com/version/latest`.
+// The static website feed uses strict TLS and never sends device identifiers.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+    let url = crate::update_source::latest_url();
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
     let is_tls_not_cached = tls_type.is_none();
     let tls_type = tls_type.unwrap_or(TlsType::Rustls);
     let client = create_http_client_async(tls_type, false);
-    let latest_release_response: ResultType<_> = match client.post(&url).json(&request).send().await
+    let latest_release_response: ResultType<_> = match client
+        .get(&url)
+        .header(reqwest::header::CACHE_CONTROL, "no-cache")
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
     {
         Ok(resp) => Ok((tls_type, resp)),
         Err(err) => {
             if is_tls_not_cached && err.is_request() {
                 let tls_type = TlsType::NativeTls;
                 let client = create_http_client_async(tls_type, false);
-                match client.post(&url).json(&request).send().await {
+                match client
+                    .get(&url)
+                    .header(reqwest::header::CACHE_CONTROL, "no-cache")
+                    .timeout(std::time::Duration::from_secs(30))
+                    .send()
+                    .await
+                {
                     Ok(resp) => Ok((tls_type, resp)),
                     Err(err) => Err(err.into()),
                 }
@@ -1149,7 +1098,7 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
         }
     };
     let response_bytes = match latest_release_response {
-        Ok((used_tls_type, response)) => {
+        Ok((used_tls_type, mut response)) => {
             upsert_tls_cache(tls_url, used_tls_type, false);
             let status = response.status();
             if !status.is_success() {
@@ -1157,7 +1106,23 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
                     "Software update check failed with HTTP status: {status}"
                 ))
             } else {
-                response.bytes().await.map_err(|err| err.into())
+                let mut bytes = Vec::new();
+                loop {
+                    let chunk = match response.chunk().await {
+                        Ok(Some(chunk)) => chunk,
+                        Ok(None) => break,
+                        Err(err) => {
+                            clear_software_update_url();
+                            return Err(err.into());
+                        }
+                    };
+                    if bytes.len() + chunk.len() > 16 * 1024 {
+                        clear_software_update_url();
+                        bail!("Software update feed exceeds maximum size");
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(Bytes::from(bytes))
             }
         }
         Err(err) => Err(err),
@@ -3004,39 +2969,29 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn parses_stable_rustdesk_release_url() {
-        let update_url = "https://github.com/boagestao/bgdesk/releases/tag/v1.4.6";
-
-        assert_eq!(release_id_from_update_url(update_url).unwrap(), "v1.4.6");
+    fn parses_stable_bgdesk_release_url() {
+        let update_url = crate::update_source::release_url("v1.4.6");
+        assert_eq!(release_id_from_update_url(&update_url).unwrap(), "v1.4.6");
         assert_eq!(display_version_from_release_id("v1.4.6").unwrap(), "1.4.6");
-        assert_eq!(
-            release_id_from_update_url(&format!("{update_url}/")).unwrap(),
-            "v1.4.6"
-        );
     }
 
     #[test]
-    fn rejects_untrusted_release_urls_and_unstable_versions() {
-        for update_url in [
-            "http://github.com/boagestao/bgdesk/releases/tag/v1.4.6",
-            "https://github.com:8443/rustdesk/rustdesk/releases/tag/v1.4.6",
-            "https://github.com:443/rustdesk/rustdesk/releases/tag/v1.4.6",
-            "https://user@github.com/boagestao/bgdesk/releases/tag/v1.4.6",
-            "https://example.com/rustdesk/rustdesk/releases/tag/v1.4.6",
-            "https://github.com/other/rustdesk/releases/tag/v1.4.6",
-            "https://github.com/rustdesk/other/releases/tag/v1.4.6",
-            "https://github.com/boagestao/bgdesk/releases/download/v1.4.6/rustdesk.exe",
-            "https://github.com/boagestao/bgdesk/releases/tag/v1.4.6?x=1",
-            "https://github.com/boagestao/bgdesk/releases/tag/v1.4.6#asset",
-            "https://github.com/boagestao/bgdesk/releases/tag/v1.4.6/extra",
-            "https://github.com/boagestao/bgdesk/releases/tag/v1%2F4%2F6",
-            "https://github.com/boagestao/bgdesk/releases/tag/%2e%2e",
-        ] {
-            assert!(release_id_from_update_url(update_url).is_err());
-        }
-        for release_id in ["v1.4.6-rc1", "nightly", "v9223372036854775807.1.1"] {
-            assert!(display_version_from_release_id(release_id).is_err());
-        }
+    fn website_update_feed_only_announces_newer_versions_and_clears_old_results() {
+        let newer = crate::update_source::release_url("v65535.0.0");
+        let response = serde_json::json!({"url": newer}).to_string();
+        process_software_update_check_response(Bytes::from(response)).unwrap();
+        assert_eq!(*SOFTWARE_UPDATE_URL.lock().unwrap(), newer);
+        let current = crate::update_source::release_url(crate::VERSION);
+        let response = serde_json::json!({"url": current}).to_string();
+        process_software_update_check_response(Bytes::from(response)).unwrap();
+        assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());
+        *SOFTWARE_UPDATE_URL.lock().unwrap() = newer.clone();
+        process_software_update_check_response(Bytes::from_static(b"{\"url\":\"\"}")).unwrap();
+        assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());
+        let other = newer.replace("bgdesk.com", "example.com");
+        let response = serde_json::json!({"url": other}).to_string();
+        assert!(process_software_update_check_response(Bytes::from(response)).is_err());
+        assert!(process_software_update_check_response(Bytes::from_static(b"<html>SPA</html>")).is_err());
     }
 
     #[test]

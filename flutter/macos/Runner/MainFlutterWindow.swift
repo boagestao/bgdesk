@@ -20,6 +20,22 @@ import texture_rgba_renderer
 
 private let kBgDeskChannelNamespace = "br.com.boagestao.bgdesk"
 
+// Global state for relative mouse mode.
+// All properties and methods must be accessed on the main thread since they
+// interact with NSEvent monitors, CoreGraphics APIs, and Flutter channels.
+// Note: We avoid @MainActor to maintain macOS 10.14 compatibility.
+class RelativeMouseState {
+    static let shared = RelativeMouseState()
+
+    var enabled = false
+    var eventMonitor: Any?
+    var deltaChannel: FlutterMethodChannel?
+    var accumulatedDeltaX: CGFloat = 0
+    var accumulatedDeltaY: CGFloat = 0
+
+    private init() {}
+}
+
 class MainFlutterWindow: NSWindow {
     private static let fullscreenWorkAreaSizes = NSMapTable<NSWindow, NSValue>(
         keyOptions: [.weakMemory, .objectPointerPersonality],
@@ -83,7 +99,91 @@ class MainFlutterWindow: NSWindow {
     public func setWindowInterfaceMode(window: NSWindow, themeName: String) {
         window.appearance = NSAppearance(named: themeName == "light" ? .aqua : .darkAqua)
     }
-    
+
+    private func enableNativeRelativeMouseMode(channel: FlutterMethodChannel) -> Bool {
+        assert(Thread.isMainThread, "enableNativeRelativeMouseMode must be called on the main thread")
+        let state = RelativeMouseState.shared
+        if state.enabled {
+            // Already enabled: update the channel so this caller receives deltas.
+            state.deltaChannel = channel
+            return true
+        }
+
+        // Dissociate mouse from cursor position - this locks the cursor in place.
+        // Do this first, before setting any state.
+        let result = CGAssociateMouseAndMouseCursorPosition(0)
+        if result != CGError.success {
+            NSLog("[BGDesk] Failed to dissociate mouse from cursor position: %d", result.rawValue)
+            return false
+        }
+
+        state.deltaChannel = channel
+        state.accumulatedDeltaX = 0
+        state.accumulatedDeltaY = 0
+
+        // Local event monitors always run on the main thread.
+        state.eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]) { [weak state] event in
+            guard let state = state else { return event }
+            guard state.enabled else { return event }
+            let deltaX = event.deltaX
+            let deltaY = event.deltaY
+
+            if deltaX != 0 || deltaY != 0 {
+                state.accumulatedDeltaX += deltaX
+                state.accumulatedDeltaY += deltaY
+
+                let intX = Int(state.accumulatedDeltaX)
+                let intY = Int(state.accumulatedDeltaY)
+
+                if intX != 0 || intY != 0 {
+                    state.accumulatedDeltaX -= CGFloat(intX)
+                    state.accumulatedDeltaY -= CGFloat(intY)
+                    state.deltaChannel?.invokeMethod("onMouseDelta", arguments: ["dx": intX, "dy": intY])
+                }
+            }
+
+            return event
+        }
+
+        if state.eventMonitor == nil {
+            NSLog("[BGDesk] Failed to create event monitor for relative mouse mode")
+            CGAssociateMouseAndMouseCursorPosition(1)
+            state.deltaChannel = nil
+            return false
+        }
+
+        state.enabled = true
+        return true
+    }
+
+    private func disableNativeRelativeMouseMode() {
+        assert(Thread.isMainThread, "disableNativeRelativeMouseMode must be called on the main thread")
+        let state = RelativeMouseState.shared
+        if !state.enabled { return }
+
+        state.enabled = false
+
+        if let monitor = state.eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            state.eventMonitor = nil
+        }
+
+        state.deltaChannel = nil
+        state.accumulatedDeltaX = 0
+        state.accumulatedDeltaY = 0
+
+        let result = CGAssociateMouseAndMouseCursorPosition(1)
+        if result != CGError.success {
+            NSLog("[BGDesk] Failed to re-associate mouse with cursor position: %d, scheduling retry...", result.rawValue)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                let retryResult = CGAssociateMouseAndMouseCursorPosition(1)
+                if retryResult != CGError.success {
+                    NSLog("[BGDesk] Retry failed to re-associate mouse: %d. Cursor may remain locked.", retryResult.rawValue)
+                }
+            }
+        }
+    }
+
     public func setMethodHandler(registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "\(kBgDeskChannelNamespace)/macos", binaryMessenger: registrar.messenger)
         channel.setMethodCallHandler({

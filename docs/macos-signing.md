@@ -27,6 +27,7 @@ imagem e do app e só então copiam o app para Aplicativos.
    ```sh
    MACOS_P12_FILE="/caminho/DeveloperId.p12"
    MACOS_P12_PASSWORD="senha-do-p12"
+   MACOS_NOTARY_PROFILE="dev"
    ```
 
    `Apple Development` e `Apple Distribution` não substituem **Developer ID
@@ -38,10 +39,14 @@ imagem e do app e só então copiam o app para Aplicativos.
    solicita a senha de forma interativa:
 
    ```sh
-   xcrun notarytool store-credentials bgdesk-notary \
+   xcrun notarytool store-credentials dev \
      --apple-id belizariogr@gmail.com \
      --team-id 3Z7C3Q7NMT
    ```
+
+   O primeiro argumento é o nome do perfil. Ele tem de ser o mesmo valor de
+   `MACOS_NOTARY_PROFILE` no `.env`. O padrão, se a variável não existir, é
+   `bgdesk-notary`.
 
    Também é possível usar uma chave da API App Store Connect com
    `notarytool store-credentials --key ... --key-id ... --issuer ...`.
@@ -126,13 +131,22 @@ Não substituem a validação final com certificado Developer ID e a Apple.
 
 ## GitHub Actions
 
-O workflow `flutter-build.yml` mantém os secrets `MACOS_P12_BASE64`,
-`MACOS_P12_PASSWORD`, `MACOS_CODESIGN_IDENTITY` e `MACOS_NOTARIZE_JSON`.
-O `.p12` precisa conter Developer ID Application e sua chave privada da equipe
-`3Z7C3Q7NMT`. O JSON de notarização segue o formato do `rcodesign` já utilizado
-pelo workflow. A etapa de distribuição usa o mesmo assinador de binários e
-entitlements, valida o certificado e exige ticket e aprovação do Gatekeeper
-para o DMG final.
+O fluxo de distribuição é `release.yml`, que chama o mesmo `build.sh mac` ou
+`build.sh cliente mac` validado localmente. Usa `MACOS_P12_BASE64`,
+`MACOS_P12_PASSWORD`, `MACOS_NOTARY_APPLE_ID` e `MACOS_NOTARY_PASSWORD` dos GitHub
+Secrets. A identidade e a equipe podem ser configuradas por Secrets opcionais.
+O `.p12` é decodificado no diretório temporário do runner; o empacotador cria e
+remove seu Keychain temporário. O perfil local do Keychain não é transferido.
+
+Para salvar as credenciais do `.env` sem imprimir valores:
+
+```sh
+python3 scripts/ci/setup-github-secrets.py --apply
+```
+
+O [guia do GitHub Actions](github-actions.md) detalha a configuração, o acesso ao
+submódulo privado e a publicação dos DMGs e manifestos assinados no Cloudflare R2.
+O workflow legado `flutter-build.yml` não é usado pelo novo fluxo da `main`.
 
 Referências: [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/),
 [Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),

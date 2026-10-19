@@ -303,7 +303,7 @@ write_windows_build_env_local() {
   local env_file="$ROOT/scripts/windows-build-env.local.sh"
   local win_home llvm_root llvm_bin
   win_home="$(win_home_path)"
-  llvm_root="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6"
+  llvm_root="${BGDESK_LLVM_ROOT:-$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6}"
   llvm_bin="$llvm_root/bin"
   log "gravando $env_file ..."
   cat >"$env_file" <<EOF
@@ -319,6 +319,11 @@ EOF
 }
 
 verify_libclang() {
+  if [[ -n "${LIBCLANG_PATH:-}" && -f "$LIBCLANG_PATH/libclang.dll" ]]; then
+    export BGDESK_LLVM_ROOT="${BGDESK_LLVM_ROOT:-$(dirname "$LIBCLANG_PATH")}"
+    log "libclang: $LIBCLANG_PATH"
+    return 0
+  fi
   local llvm_root="$VCPKG_ROOT/downloads/tools/clang/clang-15.0.6"
   local llvm_bin="$llvm_root/bin"
   if [[ -f "$llvm_bin/libclang.dll" ]]; then

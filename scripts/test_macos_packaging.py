@@ -149,6 +149,36 @@ EOF''')
         self.assertIn("bgdesk-test-missing-profile", result.stderr)
         self.assertEqual(archive.read_bytes(), b"previous release")
 
+    def test_dotenv_notary_profile_name_is_used(self):
+        env = self.fake_tool("security", '''cat <<'EOF'
+  1) 1111111111111111111111111111111111111111 "Developer ID Application: Test (3Z7C3Q7NMT)"
+     1 valid identities found
+EOF''')
+        self.fake_tool("xcrun", 'if [[ "$1" == "--find" ]]; then exit 0; fi\nexit 1')
+        env.pop("MACOS_CODESIGN_IDENTITY", None)
+        env.pop("MACOS_NOTARY_PROFILE", None)
+        dotenv = self.base / "notary.env"
+        dotenv.write_text("MACOS_NOTARY_PROFILE=perfil-do-dotenv\n")
+        env["BGDESK_DOTENV_FILE"] = str(dotenv)
+        result = self.run_command(["bash", PACKAGE, "--check"], env=env, ok=False)
+        self.assertIn("perfil-do-dotenv", result.stderr)
+        self.assertNotIn("bgdesk-notary", result.stderr)
+
+    def test_environment_notary_profile_overrides_dotenv(self):
+        env = self.fake_tool("security", '''cat <<'EOF'
+  1) 1111111111111111111111111111111111111111 "Developer ID Application: Test (3Z7C3Q7NMT)"
+     1 valid identities found
+EOF''')
+        self.fake_tool("xcrun", 'if [[ "$1" == "--find" ]]; then exit 0; fi\nexit 1')
+        env.pop("MACOS_CODESIGN_IDENTITY", None)
+        dotenv = self.base / "notary.env"
+        dotenv.write_text("MACOS_NOTARY_PROFILE=perfil-do-dotenv\n")
+        env["BGDESK_DOTENV_FILE"] = str(dotenv)
+        env["MACOS_NOTARY_PROFILE"] = "perfil-do-ambiente"
+        result = self.run_command(["bash", PACKAGE, "--check"], env=env, ok=False)
+        self.assertIn("perfil-do-ambiente", result.stderr)
+        self.assertNotIn("perfil-do-dotenv", result.stderr)
+
     def test_local_archive_requires_distinct_filename(self):
         app = self.base / "BGDesk.app"
         (app / "Contents/MacOS").mkdir(parents=True)
@@ -246,15 +276,18 @@ touch "${@: -1}"
         self.fake_tool("codesign", "exit 1")
         self.fake_tool("sudo", 'touch "$TEST_INSTALLED"; exit 99')
         self.fake_tool("hdiutil", 'touch "$TEST_MOUNTED"; exit 99')
+        self.fake_tool("uname", 'if [[ "$1" == "-m" ]]; then echo "$TEST_ARCH"; else echo Darwin; fi')
         env.update(TEST_DOWNLOAD=str(self.base / "download"),
                    TEST_INSTALLED=str(self.base / "installed"),
                    TEST_MOUNTED=str(self.base / "mount-called"), TMPDIR=str(self.base))
-        for script, mode in (("install.sh", "suporte"), ("install-client.sh", "cliente")):
-            with self.subTest(script=script):
-                self.run_command(["bash", ROOT / "installers" / script], env=env, ok=False)
-                self.assertIn(f"bgdesk-{mode}-darwin.dmg", (self.base / "download").read_text())
-                self.assertFalse((self.base / "installed").exists())
-                self.assertFalse((self.base / "mount-called").exists())
+        for arch, download_arch in (("arm64", "aarch64"), ("x86_64", "x86_64")):
+            env["TEST_ARCH"] = arch
+            for script, mode in (("install.sh", "suporte"), ("install-client.sh", "cliente")):
+                with self.subTest(script=script, arch=arch):
+                    self.run_command(["bash", ROOT / "installers" / script], env=env, ok=False)
+                    self.assertIn(f"bgdesk-{mode}-{download_arch}.dmg", (self.base / "download").read_text())
+                    self.assertFalse((self.base / "installed").exists())
+                    self.assertFalse((self.base / "mount-called").exists())
 
     def test_dotenv_is_gitignored(self):
         result = self.run_command(["git", "-C", ROOT, "check-ignore", "-q", ".env"])

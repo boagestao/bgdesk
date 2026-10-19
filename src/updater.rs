@@ -573,7 +573,7 @@ pub fn check_update_as_root() -> ResultType<bool> {
         artifact.version,
         dmg_url
     );
-    // Validate URL against GitHub release allowlist before downloading as root
+    // Validate URL against BGDesk release allowlist before downloading as root
     let Some(file_path_validated) = get_update_download_file_from_url(dmg_url) else {
         bail!("[root-update] URL failed allowlist check: {}", dmg_url);
     };

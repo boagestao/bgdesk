@@ -24,10 +24,16 @@ cleanup() {
 trap cleanup EXIT
 
 requirement='=anchor apple generic and certificate leaf[subject.OU] = "3Z7C3Q7NMT" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+case "$(uname -m)" in
+  arm64|aarch64) download_arch=aarch64 ;;
+  x86_64) download_arch=x86_64 ;;
+  *) abort "Arquitetura de Mac não suportada." ;;
+esac
+download_origin="${BGDESK_DOWNLOAD_ORIGIN:-https://download.bgdesk.com}"
 dmg="$work_dir/BGDesk.dmg"
 echo "Baixando o BGDesk..."
 curl --fail --location --retry 3 \
-  "https://boagestao.com.br/bgdesk/bgdesk-cliente-darwin.dmg" --output "$dmg"
+  "$download_origin/bgdesk-cliente-$download_arch.dmg" --output "$dmg"
 
 echo "Validando a assinatura do DMG..."
 codesign --verify --strict -R "$requirement" "$dmg"

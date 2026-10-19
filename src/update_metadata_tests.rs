@@ -107,6 +107,34 @@ fn accepts_valid_metadata_and_signature() {
 }
 
 #[test]
+fn website_update_metadata_requires_own_edition_even_with_valid_signature() {
+    let prefix = format!("{}/", crate::update_source::release_url("v1.4.6"));
+    let mut data = metadata();
+    data["artifacts"][0]["url"] = json!(format!("{prefix}rustdesk-1.4.6-x86_64.exe"));
+    let verify_website = |fixture: &Fixture| {
+        let trusted_keys = [key(fixture.public_key)];
+        verify_update_metadata_with_options(
+            &fixture.metadata,
+            &fixture.signature,
+            VerificationOptions {
+                requirements: requirements(query()),
+                expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+                artifact_url_policy: ArtifactUrlPolicy::ExactPrefix(&prefix),
+                trusted_keys: &trusted_keys,
+            },
+        )
+    };
+    assert!(verify_website(&sign_fixture(data.clone(), KEY_ID)).is_ok());
+    let other = if PUBLIC_UPDATE_PACKAGE_ID == "bgdesk-cliente" {
+        "bgdesk-suporte"
+    } else {
+        "bgdesk-cliente"
+    };
+    data["package_id"] = json!(other);
+    assert!(verify_website(&sign_fixture(data, KEY_ID)).is_err());
+}
+
+#[test]
 fn rejects_bad_signature_or_tampered_metadata() {
     let mut fixture = valid_fixture();
     fixture.metadata.push(b' ');

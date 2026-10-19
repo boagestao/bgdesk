@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+config
+.tools
+target
+build
+flutter/build
+flutter/.dart_tool
+node_modules
+**/*.p12
+**/*.pfx
+**/*.key
+**/update-signing.json

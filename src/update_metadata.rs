@@ -22,14 +22,24 @@ pub(crate) use offline::{verify_offline_update_metadata, OfflineUpdateMetadataRe
 
 const UPDATE_METADATA_SIGNATURE_CONTEXT: &[u8] = b"RustDesk update metadata v1\n";
 const UPDATE_APP: &str = "rustdesk";
-pub(crate) const PUBLIC_UPDATE_PACKAGE_ID: &str = "bgdesk";
+#[cfg(feature = "incoming-only")]
+pub(crate) const PUBLIC_UPDATE_PACKAGE_ID: &str = "bgdesk-cliente";
+#[cfg(not(feature = "incoming-only"))]
+pub(crate) const PUBLIC_UPDATE_PACKAGE_ID: &str = "bgdesk-suporte";
 const METADATA_SCHEMA_VERSION: u32 = 1;
 const SIGNATURE_SCHEMA_VERSION: u32 = 1;
 const SIGNATURE_ALGORITHM: &str = "ed25519";
 
-// BGDesk release signing keys must be provisioned here before signed updates are enabled.
+// BGDesk release public key. The private seed is kept outside the repository.
 // Upstream RustDesk keys cannot authorize a BGDesk update.
-const TRUSTED_UPDATE_KEYS: &[TrustedUpdateKey] = &[];
+const TRUSTED_UPDATE_KEYS: &[TrustedUpdateKey] = &[TrustedUpdateKey {
+    key_id: "2026-ed25519-main",
+    algorithm: "ed25519",
+    public_key: [
+        216, 205, 180, 221, 208, 19, 159, 110, 172, 79, 199, 41, 94, 5, 118, 141, 178, 184, 136,
+        207, 85, 25, 152, 88, 203, 103, 254, 79, 163, 246, 165, 116,
+    ],
+}];
 
 #[derive(Deserialize)]
 struct UpdateMetadata {

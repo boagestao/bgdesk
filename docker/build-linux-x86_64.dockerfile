@@ -10,7 +10,7 @@ ENV CARGO_INCREMENTAL=0
 ENV PUB_CACHE=/root/.pub-cache
 ENV PATH="/opt/flutter/bin:/root/.cargo/bin:${PATH}"
 
-ARG RUST_VERSION=1.75.0
+ARG RUST_VERSION=1.98.0
 ARG FLUTTER_VERSION=3.29.3
 ARG VCPKG_COMMIT_ID=120deac3062162151622ca4860575a33844ba10b
 ARG FLUTTER_RUST_BRIDGE_VERSION=1.80.1
@@ -65,7 +65,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
         zsync \
         xz-utils \
     # Project builds opus via vcpkg; system libopus-dev conflicts.
-    && apt-get remove -y libopus-dev || true \
+    && apt-get remove -y libopus-dev \
     && rm -rf /var/lib/apt/lists/* \
     && git config --global --add safe.directory /opt/flutter \
     && git config --global --add safe.directory /root/bgdesk \
@@ -96,8 +96,8 @@ RUN wget -q "https://storage.googleapis.com/flutter_infra_release/releases/stabl
     && tar xf "flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" -C /opt \
     && rm "flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
     && /opt/flutter/bin/flutter config --no-analytics \
-    && /opt/flutter/bin/flutter precache --linux \
-    && /opt/flutter/bin/flutter doctor -v || true
+    && /opt/flutter/bin/flutter precache --linux
+RUN /opt/flutter/bin/flutter doctor -v || true
 
 # --- appimage-builder ---
 RUN pip3 install --no-cache-dir "setuptools_scm<10" \
@@ -106,9 +106,10 @@ RUN pip3 install --no-cache-dir "setuptools_scm<10" \
 # --- project vcpkg deps (baked into the image; only invalidated when manifests change) ---
 COPY vcpkg.json /tmp/bgdesk-vcpkg/vcpkg.json
 COPY res/vcpkg /tmp/bgdesk-vcpkg/res/vcpkg
+COPY res/vcpkg-triplets /tmp/bgdesk-vcpkg/res/vcpkg-triplets
 RUN cd /tmp/bgdesk-vcpkg \
     && "${VCPKG_ROOT}/vcpkg" install \
-        --triplet "${VCPKG_TRIPLET}" \
+        --triplet "${VCPKG_TRIPLET}" --clean-after-build \
         --x-install-root="${VCPKG_ROOT}/installed" \
     && rm -rf /tmp/bgdesk-vcpkg \
         "${VCPKG_ROOT}/buildtrees" \

@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn resolves_public_and_custom_update_package_identity() {
         assert_eq!(
-            "bgdesk",
+            crate::update_metadata::PUBLIC_UPDATE_PACKAGE_ID,
             expected_update_package_id(false, Some("br.com.boagestao.bgdesk".to_owned())).unwrap()
         );
         assert_eq!(

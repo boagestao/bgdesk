@@ -26,10 +26,6 @@ else
   [[ $# == 2 ]] || fail "Uso: $0 [--local] app.app output.dmg"
 fi
 
-team_id="${MACOS_TEAM_ID:-3Z7C3Q7NMT}"
-[[ "$team_id" =~ ^[A-Z0-9]{10}$ ]] || fail "MACOS_TEAM_ID inválido."
-profile="${MACOS_NOTARY_PROFILE:-bgdesk-notary}"
-identity="${MACOS_CODESIGN_IDENTITY:-}"
 tmp_keychain=""
 tmp_keychain_dir=""
 work_dir=""
@@ -125,6 +121,11 @@ prepare_external_p12() {
 
 load_dotenv
 
+team_id="${MACOS_TEAM_ID:-3Z7C3Q7NMT}"
+[[ "$team_id" =~ ^[A-Z0-9]{10}$ ]] || fail "MACOS_TEAM_ID inválido."
+profile="${MACOS_NOTARY_PROFILE:-bgdesk-notary}"
+identity="${MACOS_CODESIGN_IDENTITY:-}"
+
 if [[ "$identity" == "-" && "$local_build" == "1" ]]; then
   echo "[macOS] Assinatura ad hoc para testes locais."
 else
@@ -159,20 +160,22 @@ print(matches[0][0])
 ' "$identity" "$local_build" "$team_id")
 fi
 
-if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" || -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
-  [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" ]] || \
-    fail "Defina MACOS_NOTARY_APPLE_ID e MACOS_NOTARY_PASSWORD juntas, somente no ambiente deste computador."
+if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
   notary_args=(--apple-id "$MACOS_NOTARY_APPLE_ID" --password "$MACOS_NOTARY_PASSWORD" --team-id "$team_id")
+  notary_label="conta Apple"
+elif [[ -n "${MACOS_NOTARY_APPLE_ID:-}" || -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
+  fail "Defina MACOS_NOTARY_APPLE_ID e MACOS_NOTARY_PASSWORD juntas no .env, ou use só MACOS_NOTARY_PROFILE."
 else
   notary_args=(--keychain-profile "$profile")
   if [[ -n "${MACOS_NOTARY_KEYCHAIN:-}" ]]; then
     notary_args+=(--keychain "$MACOS_NOTARY_KEYCHAIN")
   fi
+  notary_label="perfil '$profile'"
 fi
 if [[ "$local_build" == "0" ]]; then
   xcrun --find notarytool >/dev/null
   xcrun --find stapler >/dev/null
-  if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" ]]; then
+  if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
     notary_hint="Não foi possível autenticar a notarização. Confira MACOS_NOTARY_APPLE_ID e MACOS_NOTARY_PASSWORD no .env."
   else
     notary_hint="Configure o perfil de notarização '$profile' conforme docs/macos-signing.md."
@@ -180,7 +183,11 @@ if [[ "$local_build" == "0" ]]; then
   xcrun notarytool history "${notary_args[@]}" --output-format json >/dev/null || \
     fail "$notary_hint"
 fi
-echo "[macOS] Identidade: $identity; equipe: $team_id."
+if [[ "$local_build" == "0" && "$identity" != "-" ]]; then
+  echo "[macOS] Identidade: $identity; equipe: $team_id; notarização: $notary_label."
+else
+  echo "[macOS] Identidade: $identity; equipe: $team_id."
+fi
 [[ "$check_only" == "0" ]] || exit 0
 
 app_path=$1

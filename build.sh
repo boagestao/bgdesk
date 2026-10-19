@@ -232,7 +232,7 @@ log_flutter_for_build() {
 }
 
 generate_bridge_windows() {
-  local llvm_root="${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6"
+  local llvm_root="${BGDESK_LLVM_ROOT:-${VCPKG_ROOT}/downloads/tools/clang/clang-15.0.6}"
   local llvm_bin="${llvm_root}/bin"
   if [[ ! -f "$llvm_bin/libclang.dll" ]]; then
     echo "[build] ERRO: libclang não encontrado em $llvm_bin"
@@ -250,14 +250,33 @@ generate_bridge_windows() {
   popd >/dev/null
   echo "[build] LIBCLANG_PATH=$LIBCLANG_PATH"
   echo "[build] flutter_rust_bridge llvm-path=$llvm_root"
-  flutter_rust_bridge_codegen --llvm-path "$llvm_root" \
+  flutter_rust_bridge_codegen --no-build-runner --llvm-path "$llvm_root" \
     --rust-input ./src/flutter_ffi.rs \
     --dart-output ./flutter/lib/generated_bridge.dart \
     --c-output ./flutter/macos/Runner/bridge_generated.h
   cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
-  pushd flutter >/dev/null
-  dart run build_runner build --delete-conflicting-outputs
-  popd >/dev/null
+  # freezed 2.5's analyzer cannot parse Dart 3.13 from the build SDK.
+  # Use the same separate 3.44.4 tools SDK as the validated macOS build.
+  local bridge_dir="${FLUTTER_BRIDGE_DIR:-$ROOT/.tools/flutter-bridge-tools}"
+  local bridge_version="${FLUTTER_BRIDGE_VERSION:-3.44.4}"
+  if [[ ! -f "$bridge_dir/bin/flutter.bat" ]]; then
+    mkdir -p "$ROOT/.tools/tmp"
+    local archive="$ROOT/.tools/tmp/flutter-bridge-windows.zip"
+    curl -fL "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_${bridge_version}-stable.zip" -o "$archive"
+    local extracted
+    extracted="$(mktemp -d "$ROOT/.tools/tmp/bridge.XXXXXX")"
+    unzip -q "$archive" -d "$extracted"
+    mkdir -p "$(dirname "$bridge_dir")"
+    mv "$extracted/flutter" "$bridge_dir"
+    rmdir "$extracted"
+    rm -f "$archive"
+  fi
+  (
+    export PATH="$bridge_dir/bin:$PATH"
+    cd flutter
+    flutter pub get
+    dart run build_runner build --delete-conflicting-outputs
+  )
 }
 
 bridge_exists() {
