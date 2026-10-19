@@ -85,8 +85,6 @@ const double _kPositionEpsilon = 1e-6;
 bool get isMainDesktopWindow =>
     desktopType == DesktopType.main || desktopType == DesktopType.cm;
 
-String get screenInfo => screenInfo_;
-
 /// Check if the app is running with single view mode.
 bool isSingleViewApp() {
   return desktopType == DesktopType.cm;
@@ -609,22 +607,6 @@ class MyTheme {
       // Synchronize the window theme of the system.
       updateSystemWindowTheme();
     }
-  }
-
-  /// Applies [fallbacks] as fontFamilyFallback to every text style in both
-  /// themes. Called once at startup on ARM64 Linux after a CJK font has been
-  /// loaded via FontLoader (see flutter/flutter#139293).
-  static void applyFontFallback(List<String> fallbacks) {
-    lightTheme = lightTheme.copyWith(
-      textTheme: lightTheme.textTheme.apply(fontFamilyFallback: fallbacks),
-      primaryTextTheme:
-          lightTheme.primaryTextTheme.apply(fontFamilyFallback: fallbacks),
-    );
-    darkTheme = darkTheme.copyWith(
-      textTheme: darkTheme.textTheme.apply(fontFamilyFallback: fallbacks),
-      primaryTextTheme:
-          darkTheme.primaryTextTheme.apply(fontFamilyFallback: fallbacks),
-    );
   }
 
   static ThemeMode currentThemeMode() {
@@ -1214,6 +1196,48 @@ void msgBox(SessionID sessionId, String type, String title, String text,
     VoidCallback? onSubmit,
     int? submitTimeout}) {
   dialogManager.dismissAll();
+  if (type.contains('insecure-connection')) {
+    Future<void> closeSession() async {
+      await bind.sessionSetCommon(
+        sessionId: sessionId,
+        key: 'continue-insecure-connection',
+        value: 'N',
+      );
+      dialogManager.dismissAll();
+      closeConnection();
+    }
+
+    void continueSession() {
+      unawaited(
+        bind.sessionSetCommon(
+          sessionId: sessionId,
+          key: 'continue-insecure-connection',
+          value: 'Y',
+        ),
+      );
+      dialogManager.dismissAll();
+    }
+
+    dialogManager.show(
+      (setState, close, context) => CustomAlertDialog(
+        title: null,
+        content: SelectionArea(child: msgboxContent(type, title, text)),
+        actions: [
+          dialogButton(
+            'Continue',
+            onPressed: continueSession,
+            isOutline: true,
+          ),
+          dialogButton('Disconnect', onPressed: closeSession),
+        ],
+        onSubmit: closeSession,
+        onCancel: closeSession,
+      ),
+      tag: '$sessionId-$type-$title-$text-$link',
+    );
+    return;
+  }
+
   List<Widget> buttons = [];
   bool hasOk = false;
   submit() {
@@ -1508,13 +1532,6 @@ class AndroidPermissionManager {
   static Timer? _timer;
   static var _current = "";
 
-  static bool isWaitingFile() {
-    if (_completer != null) {
-      return !_completer!.isCompleted && _current == kManageExternalStorage;
-    }
-    return false;
-  }
-
   static Future<bool> check(String type) {
     if (isDesktop || isWeb) {
       return Future.value(true);
@@ -1629,7 +1646,8 @@ String bool2option(String option, bool b) {
   String res;
   if (option.startsWith('enable-') &&
       option != kOptionEnableUdpPunch &&
-      option != kOptionEnableIpv6Punch) {
+      option != kOptionEnableIpv6Punch &&
+      option != kOptionEnableWebrtc) {
     res = b ? defaultOptionYes : 'N';
   } else if (option.startsWith('allow-') ||
       option == kOptionStopService ||
@@ -2628,13 +2646,6 @@ connect(BuildContext context, String id,
     }
   } else {
     if (isFileTransfer) {
-      if (isAndroid) {
-        if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-          if (!await AndroidPermissionManager.request(kManageExternalStorage)) {
-            return;
-          }
-        }
-      }
       if (isWeb) {
         Navigator.push(
           context,
@@ -3186,6 +3197,15 @@ void onCopyFingerprint(String value) {
   }
 }
 
+void onCopyId(String value) {
+  if (value.isNotEmpty) {
+    Clipboard.setData(ClipboardData(text: value));
+    showToast('$value\n${translate("Copied")}');
+  } else {
+    showToast(translate("Invalid ID"));
+  }
+}
+
 Future<bool> callMainCheckSuperUserPermission() async {
   bool checked = await bind.mainCheckSuperUserPermission();
   if (isMacOS) {
@@ -3454,7 +3474,12 @@ Future<List<Rect>> getScreenRectList() async {
 }
 
 openMonitorInTheSameTab(int i, FFI ffi, PeerInfo pi,
-    {bool updateCursorPos = true}) {
+    {bool updateCursorPos = true, bool recordSelection = true}) {
+  if (recordSelection) {
+    ffi.ffiModel.lastUserDisplay = i;
+    ffi.ffiModel.cancelPendingRestoreTimer();
+    ffi.ffiModel.pendingMonitorRestore = null;
+  }
   final displays = i == kAllDisplayValue
       ? List.generate(pi.displays.length, (index) => index)
       : [i];
@@ -4065,6 +4090,11 @@ bool whitelistNotEmpty() {
   return v != '' && v != ',';
 }
 
+bool idWhitelistNotEmpty() {
+  final v = bind.mainGetOptionSync(key: kOptionIdWhitelist);
+  return v != '' && v != ',';
+}
+
 // `setMovable()` is only supported on macOS.
 //
 // On macOS, the window can be dragged by the tab bar by default.
@@ -4095,7 +4125,8 @@ Widget netWorkErrorWidget() {
     mainAxisAlignment: MainAxisAlignment.center,
     crossAxisAlignment: CrossAxisAlignment.center,
     children: [
-      Text(translate("network_error_tip")),
+      if (!gFFI.userModel.networkErrorFromServer.value)
+        Text(translate("network_error_tip")),
       ElevatedButton(
               onPressed: gFFI.userModel.refreshCurrentUser,
               child: Text(translate("Retry")))

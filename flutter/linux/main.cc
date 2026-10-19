@@ -1,4 +1,8 @@
 #include <dlfcn.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 #include "my_application.h"
 
 #define BGDESK_LIB_PATH "libbgdesk.so"
@@ -7,8 +11,36 @@ bool gIsConnectionManager = false;
 
 void print_help_install_pkg(const char* so);
 
+// The bundle keeps the core library at lib/libbgdesk.so next to the
+// executable. Resolve that path explicitly instead of relying on the
+// runner's RPATH, which repackaged installs may strip.
+// https://github.com/rustdesk/rustdesk/discussions/14407
+static void* dlopen_bundled_lib() {
+  char exe_path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+  if (len <= 0 || len >= (ssize_t)(sizeof(exe_path) - 1)) return nullptr;
+  exe_path[len] = '\0';
+  char* last_slash = strrchr(exe_path, '/');
+  if (last_slash == nullptr) return nullptr;
+  *last_slash = '\0';
+  char lib_path[PATH_MAX + sizeof("/lib/" BGDESK_LIB_PATH)];
+  snprintf(lib_path, sizeof(lib_path), "%s/lib/%s", exe_path, BGDESK_LIB_PATH);
+  if (access(lib_path, F_OK) != 0) return nullptr;
+  void* libbgdesk = dlopen(lib_path, RTLD_LAZY);
+  if (!libbgdesk) {
+    char* error = dlerror();
+    if (error != nullptr) {
+      fprintf(stderr, "Failed to load \"%s\": %s\n", lib_path, error);
+    }
+  }
+  return libbgdesk;
+}
+
 bool flutter_rustdesk_core_main() {
-   void* libbgdesk = dlopen(BGDESK_LIB_PATH, RTLD_LAZY);
+   void* libbgdesk = dlopen_bundled_lib();
+   if (!libbgdesk) {
+      libbgdesk = dlopen(BGDESK_LIB_PATH, RTLD_LAZY);
+   }
    if (!libbgdesk) {
       fprintf(stderr,"Failed to load \"libbgdesk.so\"\n");
       char* error;

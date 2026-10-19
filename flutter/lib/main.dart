@@ -29,25 +29,15 @@ import 'mobile/pages/home_page.dart';
 import 'mobile/pages/server_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
 import 'models/platform_model.dart';
-import 'native/font_manager.dart'
-    if (dart.library.html) 'web/font_manager.dart';
-
-import 'package:flutter_hbb/plugin/handlers.dart'
-    if (dart.library.html) 'package:flutter_hbb/web/plugin/handlers.dart';
 
 /// Basic window and launch properties.
 int? kWindowId;
 WindowType? kWindowType;
 late List<String> kBootArgs;
-bool _cjkFontLoaded = false;
 
 Future<void> main(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
-  _cjkFontLoaded = await loadSystemCJKFonts();
-  if (_cjkFontLoaded) {
-    MyTheme.applyFontFallback([kLinuxCjkFontFamily]);
-  }
 
   debugPrint("launch args: $args");
   kBootArgs = List.from(args);
@@ -148,8 +138,6 @@ void runMainApp(bool startService) async {
   await bind.mainCheckConnectStatus();
   if (startService) {
     gFFI.serverModel.startService();
-    bind.pluginSyncUi(syncTo: kAppTypeMain);
-    bind.pluginListReload();
   }
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
@@ -390,7 +378,6 @@ void _runApp(
       builder: (context, child) {
         child = _keepScaleBuilder(context, child);
         child = botToastBuilder(context, child);
-        if (_cjkFontLoaded) child = _mergeCjkFallback(context, child);
         return child;
       },
     ),
@@ -541,7 +528,6 @@ class _AppState extends State<App> with WidgetsBindingObserver {
               : (context, child) {
                   child = _keepScaleBuilder(context, child);
                   child = botToastBuilder(context, child);
-                  if (_cjkFontLoaded) child = _mergeCjkFallback(context, child);
                   if ((isDesktop && desktopType == DesktopType.main) ||
                       isWebDesktop) {
                     child = keyListenerBuilder(context, child);
@@ -579,12 +565,6 @@ _registerEventHandler() {
       reloadAllWindows();
     });
   }
-  // Register native handlers.
-  if (isDesktop) {
-    platformFFI.registerEventHandler('native_ui', 'native_ui', (evt) async {
-      NativeUiHandler.instance.onEvent(evt);
-    });
-  }
   if (isAndroid) {
     platformFFI.registerEventHandler(
         'android_needs_deploy', 'android_needs_deploy', (_) async {
@@ -595,22 +575,10 @@ _registerEventHandler() {
   }
 }
 
-/// Merges the theme's fontFamilyFallback into [DefaultTextStyle] so that
-/// bare [Text] widgets (and those with inherit:true styles) also pick up the
-/// CJK fallback font loaded on ARM64 Linux.
-Widget _mergeCjkFallback(BuildContext context, Widget? child) {
-  final result = child ?? Container();
-  final fallback = Theme.of(context).textTheme.bodyMedium?.fontFamilyFallback;
-  if (fallback == null || fallback.isEmpty) return result;
-  return DefaultTextStyle.merge(
-    style: TextStyle(fontFamilyFallback: fallback),
-    child: result,
-  );
-}
-
 Widget keyListenerBuilder(BuildContext context, Widget? child) {
   return RawKeyboardListener(
-    focusNode: FocusNode(),
+    // `skipTraversal: isWeb` is to fix "Bad state: RenderBox was not laid out: minified:aeL#c19e4"
+    focusNode: FocusNode(skipTraversal: isWeb),
     child: child ?? Container(),
     onKey: (RawKeyEvent event) {
       if (event.logicalKey == LogicalKeyboardKey.shiftLeft) {

@@ -10,7 +10,7 @@ if [ "$1" = configure ]; then
 	if [ "systemd" == "$INITSYS" ]; then
 
 		if [ -e /etc/systemd/system/bgdesk.service ]; then
-			rm /etc/systemd/system/bgdesk.service /usr/lib/systemd/system/bgdesk.service /usr/lib/systemd/user/bgdesk.service >/dev/null  2>&1
+			rm -f /etc/systemd/system/bgdesk.service /usr/lib/systemd/system/bgdesk.service /usr/lib/systemd/user/bgdesk.service >/dev/null  2>&1
 		fi
 		version=$(python3 -V 2>&1 | grep -Po '(?<=Python )(.+)')
 		parsedVersion=$(echo "${version//./}")

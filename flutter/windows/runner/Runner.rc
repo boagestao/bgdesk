@@ -93,7 +93,7 @@ BEGIN
             VALUE "FileDescription", "BGDesk Remote Desktop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "bgdesk" "\0"
-            VALUE "LegalCopyright", "Based on RustDesk. Copyright © 2025 Purslane Ltd. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Based on RustDesk. Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved." "\0"
             VALUE "OriginalFilename", "bgdesk.exe" "\0"
             VALUE "ProductName", "BGDesk" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

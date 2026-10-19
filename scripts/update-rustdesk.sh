@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Atualização BGDesk ← RustDesk upstream
-# Baseado em AUALIZACAO.md — integração semi-automática preservando branding BGDesk.
+# Ver UPSTREAM.md — integração semi-automática preservando branding BGDesk.
 #
 # Uso:
 #   ./scripts/update-rustdesk.sh              # menu interativo
@@ -11,16 +11,16 @@
 # Variáveis de ambiente:
 #   BGDESK_DIR      caminho do repo BGDesk (padrão: raiz do projeto)
 #   RUSTDESK_DIR    caminho do RustDesk upstream (padrão: ~/dev/rustdesk)
-#   RUSTDESK_TAG    tag upstream (padrão: 1.4.8)
-#   TARGET_VERSION  versão alvo BGDesk (padrão: 1.4.8)
+#   RUSTDESK_TAG    tag/commit upstream (padrão: commit de .upstream-rustdesk.json)
+#   TARGET_VERSION  versão alvo BGDesk (padrão: 1.5.1)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BGDESK_DIR="${BGDESK_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 RUSTDESK_DIR="${RUSTDESK_DIR:-$HOME/dev/rustdesk}"
-RUSTDESK_TAG="${RUSTDESK_TAG:-1.4.8}"
-TARGET_VERSION="${TARGET_VERSION:-1.4.8}"
+RUSTDESK_TAG="${RUSTDESK_TAG:-53996e3c404ea5083df0775057e4149e49102084}"
+TARGET_VERSION="${TARGET_VERSION:-1.5.1}"
 UPDATE_BRANCH="update/rustdesk-${TARGET_VERSION}"
 DRY_RUN=false
 FORCE_COPY=false
@@ -33,7 +33,7 @@ PRESERVE_PATHS=(
   certs docker installers scripts .vscode
   res/setup.nsi res/mac-icon.icns
   src/custom_server.rs
-  AUALIZACAO.md
+  UPSTREAM.md
 )
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ die()  { echo "[update] ❌ $*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Atualização BGDesk ← RustDesk (ver AUALIZACAO.md)
+Atualização BGDesk ← RustDesk (ver UPSTREAM.md)
 
 Uso: $0 [opções]
 
@@ -59,7 +59,7 @@ Opções:
 
 Fases:
   0  Preparação (branch, tag backup, verificar upstream)
-  1  Submodule hbb_common (instruções + atualização opcional)
+  1  hbb_common vendorizado (instruções para merge manual)
   2  Código Rust (src/) — copia novos arquivos, lista merges manuais
   3  Bibliotecas (libs/) — copia novos, lista merges manuais
   4  Flutter — copia novos arquivos, lista merges manuais
@@ -70,7 +70,7 @@ Fases:
   9  Testes (cargo test + flutter test)
   10 Finalização (verificação de branding + checklist)
 
-Ordem recomendada (AUALIZACAO.md §9):
+Ordem recomendada:
   0 → 1 → 2 → 3 → 8.1 → 4 → 8.3 → 5 → 6 → 7 → 8.4 → 9 → 10
 EOF
 }
@@ -242,44 +242,24 @@ phase0_prepare() {
 }
 
 phase1_submodule() {
-  log "=== Fase 1 — Submodule hbb_common ==="
+  log "=== Fase 1 — hbb_common versionado no BGDesk ==="
   require_upstream
-
   local hbb_upstream_commit
-  hbb_upstream_commit="$(git -C "$RUSTDESK_DIR" ls-tree HEAD libs/hbb_common | awk '{print $3}')"
-  log "commit hbb_common no upstream $RUSTDESK_TAG: ${hbb_upstream_commit:-desconhecido}"
-
+  hbb_upstream_commit="$(git -C "$RUSTDESK_DIR" ls-tree "$RUSTDESK_TAG" libs/hbb_common | awk '{print $3}')"
+  log "commit hbb_common no upstream: ${hbb_upstream_commit:-desconhecido}"
   cat <<EOF
 
-Ação MANUAL necessária no fork bgdesk-config:
-  1. Criar branch update/hbb_common-$TARGET_VERSION
-  2. Merge/rebase de rustdesk/hbb_common (commit $hbb_upstream_commit)
-  3. Reaplicar patches BGDesk:
-     - APP_NAME = "BGDesk"
-     - ORG = "br.com.boagestao"
-     - RENDEZVOUS_SERVERS = ["bgdesk.boagestao.net"]
-     - VER_TYPE → bgdesk-client / bgdesk-server
-     - version check → https://bgdesk.boagestao.net/version/latest
-     - platform/mod.rs → "BGDesk"
-     - message.proto → scheme bgdesk://
-  4. Commit + push do bgdesk-config
-  5. Atualizar referência aqui com: HBB_COMMON_COMMIT=<hash> $0 --phase 1
+No BGDesk, libs/hbb_common é código versionado, não um submódulo.
+O único submódulo privado é config. Ver UPSTREAM.md.
+
+Faça o merge das mudanças de rustdesk/hbb_common no código local usando o
+commit anterior em .upstream-rustdesk.json como base. Preserve build.rs,
+as configurações privadas, o branding e a proteção das opções do servidor.
+Atualize também libs/base, que recebe código transferido de hbb_common.
 
 EOF
-
   if [[ -n "${HBB_COMMON_COMMIT:-}" ]]; then
-    log "atualizando submodule para $HBB_COMMON_COMMIT"
-    if $DRY_RUN; then
-      echo "[dry-run] git -C $BGDESK_DIR/libs/hbb_common fetch && checkout $HBB_COMMON_COMMIT"
-      echo "[dry-run] git -C $BGDESK_DIR add libs/hbb_common"
-    else
-      git -C "$BGDESK_DIR/libs/hbb_common" fetch origin
-      git -C "$BGDESK_DIR/libs/hbb_common" checkout "$HBB_COMMON_COMMIT"
-      git -C "$BGDESK_DIR" add libs/hbb_common
-      log "submodule atualizado e staged"
-    fi
-  else
-    warn "defina HBB_COMMON_COMMIT=<hash> para atualizar automaticamente após o merge no bgdesk-config"
+    die "HBB_COMMON_COMMIT não faz checkout de libs/hbb_common: a biblioteca é versionada diretamente. Faça o merge manual descrito em UPSTREAM.md."
   fi
 }
 
@@ -346,7 +326,7 @@ phase3_libs() {
 
   copy_new_dir "libs/libxdo-sys-stub"
 
-  for lib in scrap clipboard enigo remote_printer portable virtual_display; do
+  for lib in base scrap clipboard enigo remote_printer portable virtual_display; do
     log "--- libs/$lib ---"
     list_modified "libs/$lib" | while read -r f; do
       if $FORCE_COPY; then

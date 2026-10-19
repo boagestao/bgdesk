@@ -21,8 +21,28 @@ import texture_rgba_renderer
 private let kBgDeskChannelNamespace = "br.com.boagestao.bgdesk"
 
 class MainFlutterWindow: NSWindow {
+    private static let fullscreenWorkAreaSizes = NSMapTable<NSWindow, NSValue>(
+        keyOptions: [.weakMemory, .objectPointerPersonality],
+        valueOptions: .strongMemory
+    )
+    private static let fullscreenObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.willEnterFullScreenNotification,
+        object: nil,
+        queue: .main
+    ) { notification in
+        guard let window = notification.object as? NSWindow,
+              let screen = window.screen else {
+            return
+        }
+        fullscreenWorkAreaSizes.setObject(
+            NSValue(size: screen.visibleFrame.size),
+            forKey: window
+        )
+    }
+
     override func awakeFromNib() {
         rustdesk_core_main();
+        _ = MainFlutterWindow.fullscreenObserver
         let flutterViewController = FlutterViewController.init()
         let windowFrame = self.frame
         self.contentViewController = flutterViewController
@@ -107,6 +127,79 @@ class MainFlutterWindow: NSWindow {
                         result(granted)
                     })
                     break
+                case "bumpMouse":
+                    var dx = 0
+                    var dy = 0
+
+                    if let argMap = call.arguments as? [String: Any] {
+                        dx = (argMap["dx"] as? Int) ?? 0
+                        dy = (argMap["dy"] as? Int) ?? 0
+                    }
+                    else if let argList = call.arguments as? [Any] {
+                        dx = argList.count >= 1 ? (argList[0] as? Int) ?? 0 : 0
+                        dy = argList.count >= 2 ? (argList[1] as? Int) ?? 0 : 0
+                    }
+
+                    var mouseLoc: CGPoint
+
+                    if let dummyEvent = CGEvent(source: nil) { // can this ever fail?
+                        mouseLoc = dummyEvent.location
+                    }
+                    else if let screenFrame = NSScreen.screens.first?.frame {
+                        // NeXTStep: Origin is lower-left of primary screen, positive is up
+                        // Cocoa Core Graphics: Origin is upper-left of primary screen, positive is down
+                        let nsMouseLoc = NSEvent.mouseLocation
+
+                        mouseLoc = CGPoint(
+                            x: nsMouseLoc.x,
+                            y: NSHeight(screenFrame) - nsMouseLoc.y)
+                    }
+                    else {
+                        result(false)
+                        break
+                    }
+
+                    let newLoc = CGPoint(x: mouseLoc.x + CGFloat(dx), y: mouseLoc.y + CGFloat(dy))
+
+                    CGDisplayMoveCursorToPoint(0, newLoc)
+
+                    // By default, Cocoa suppresses mouse events briefly after a call to warp the
+                    // cursor to a new location. This is good if you want to draw the user's
+                    // attention to the fact that the mouse is now in a particular location, but
+                    // it's bad in this case; we get called as part of the handling of edge
+                    // scrolling, which means the mouse is typically still in motion, and we want
+                    // the cursor to keep moving smoothly uninterrupted.
+                    //
+                    // This function's main action is to toggle whether the mouse cursor is
+                    // associated with the mouse position, but setting it to true when it's
+                    // already true has the side-effect of cancelling this motion suppression.
+                    //
+                    // However, we must NOT call this when relative mouse mode is active,
+                    // as it would break the pointer lock established by enableNativeRelativeMouseMode.
+                    if !RelativeMouseState.shared.enabled {
+                        CGAssociateMouseAndMouseCursorPosition(1 /* true */)
+                    }
+
+                    result(true)
+
+                case "enableNativeRelativeMouseMode":
+                    let success = self.enableNativeRelativeMouseMode(channel: channel)
+                    result(success)
+
+                case "disableNativeRelativeMouseMode":
+                    self.disableNativeRelativeMouseMode()
+                    result(true)
+
+                case "getMacOSWorkAreaSize":
+                    guard Thread.isMainThread,
+                          let window = registrar.view?.window,
+                          let size = MainFlutterWindow.fullscreenWorkAreaSizes
+                            .object(forKey: window)?.sizeValue else {
+                        result(nil)
+                        break
+                    }
+                    result([Double(size.width), Double(size.height)])
+
                 default:
                     result(FlutterMethodNotImplemented)
                 }
