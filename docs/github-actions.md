@@ -305,11 +305,13 @@ separadamente, mas continuam no mesmo runner. Sem fonte aprovada, o alvo compila
 
 Os pacotes reaproveitados são baixados, validados por versão/seletores/SHA256/tamanho
 e enviados como artefatos da execução atual com `build-source.json` registrando
-commit e run originais. As pré-releases mantêm o commit original dos binários.
+commit e run originais. Reaproveitar esses pacotes não cria nem altera releases
+ou tags: a publicação original continua como referência, sem duplicar os mesmos
+binários em uma nova pré-release.
 Se todos os alvos forem reaproveitados, até a geração do bridge é pulada.
 A release estável e os feeds já publicados não são substituídos por esse mecanismo.
 
-Assim que uma edição termina, seu instalador é salvo como artefato do Actions
+Quando uma edição é compilada pela primeira vez, seu instalador é salvo como artefato do Actions
 **e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome
 `build-v<versão>-<plataforma>-<arquitetura>-<run>-<tentativa>`. A outra edição
 acrescenta seus arquivos à mesma pré-release quando termina. Os nomes são únicos,

@@ -39,16 +39,3 @@ runs:
         path: release-artifacts/${{ inputs.platform }}-${{ inputs.arch }}-suporte/*
         if-no-files-found: error
         retention-days: 14
-    - name: Publish only public packages with their original source commit
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        PLATFORM: ${{ inputs.platform }}
-        ARCH: ${{ inputs.arch }}
-        SOURCE_COMMIT: ${{ inputs.source-commit }}
-      run: |
-        for edition in cliente suporte; do
-          directory="release-artifacts/$PLATFORM-$ARCH-$edition"
-          original_commit="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$directory/build-source.json")"
-          python scripts/ci/github-release.py --commit "$original_commit" --manifest "$directory/artifacts.json"
-        done
