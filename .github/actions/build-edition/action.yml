@@ -130,20 +130,22 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         ARCH: ${{ inputs.arch }}
         EDITION: ${{ inputs.edition }}
-      run: python scripts/ci/collect-artifacts.py "$PLATFORM" "$ARCH" "$EDITION" --output "release-artifacts/$EDITION"
+      run: python scripts/ci/collect-artifacts.py "$PLATFORM" "$ARCH" "$EDITION" --output "release-artifacts/$PLATFORM-$ARCH-$EDITION"
     - name: Save edition outputs
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: build-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.edition }}
-        path: release-artifacts/${{ inputs.edition }}/*
+        path: release-artifacts/${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.edition }}/*
         if-no-files-found: error
         retention-days: 14
     - name: Publish finished packages to GitHub Releases
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        PLATFORM: ${{ inputs.platform }}
+        ARCH: ${{ inputs.arch }}
         EDITION: ${{ inputs.edition }}
-      run: python scripts/ci/github-release.py --manifest "release-artifacts/$EDITION/artifacts.json"
+      run: python scripts/ci/github-release.py --manifest "release-artifacts/$PLATFORM-$ARCH-$EDITION/artifacts.json"
     - name: Publish macOS packaging checkpoint
       if: always() && inputs.platform == 'macos'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

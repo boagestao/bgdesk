@@ -180,10 +180,22 @@ class WindowsX86Tests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'PE32'):
                 pack.main()
 
-    def test_validation_target_keeps_editions_serial_and_does_not_expand_all_before_approval(self):
+    def test_validation_and_all_keep_five_runners_with_both_windows_architectures_serial(self):
         jobs = plan.distribution_matrix('windows-x86')['include']
         self.assertEqual(jobs, [dict(platform='windows', arch='x86', runner='windows-2022')])
         self.assertEqual(len(plan.distribution_matrix('all')['include']), 5)
+        windows = [t for t in plan.distribution_matrix('all')['include'] if t['platform'] == 'windows']
+        self.assertEqual(windows, [dict(platform='windows', arch='x86_64', runner='windows-2022', win32=True)])
+        self.assertEqual(list(plan.artifact_targets('windows')), [('windows', 'x86_64'), ('windows', 'x86')])
+        self.assertEqual(list(plan.artifact_targets('windows-x86_64')), [('windows', 'x86_64')])
+        repo = Path(__file__).resolve().parents[2]
+        workflow = (repo / '.github/workflows/release.yml').read_text()
+        self.assertLess(workflow.index('name: Build, sign, and save suporte'),
+                        workflow.index('name: Build, sign, and save Win32 on the same Windows runner'))
+        composite = (repo / '.github/actions/build-edition/action.yml').read_text()
+        self.assertIn('release-artifacts/$PLATFORM-$ARCH-$EDITION', composite)
+        pair = (repo / '.github/actions/build-windows-x86-pair/action.yml').read_text()
+        self.assertLess(pair.index('edition: cliente'), pair.index('edition: suporte'))
         for edition in ('cliente', 'suporte'):
             paths = collect.specs('windows', 'x86', edition)
             self.assertEqual([fmt for fmt, _ in paths], ['exe', 'inno-exe'])

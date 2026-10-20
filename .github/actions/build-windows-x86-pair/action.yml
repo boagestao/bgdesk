@@ -1,0 +1,26 @@
+name: Build Win32 after Windows x64
+description: Reuse the same Windows runner for cliente then suporte without touching saved x64 artifacts
+runs:
+  using: composite
+  steps:
+    - name: Prepare Win32 toolchain and native dependencies
+      shell: bash
+      env:
+        RUSTUP_TOOLCHAIN: nightly-2026-09-01
+      run: |
+        rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt
+        rustup target add --toolchain "$RUSTUP_TOOLCHAIN" i686-pc-windows-msvc
+        echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" >> "$GITHUB_ENV"
+        bash scripts/ci/setup-windows-x86.sh
+    - name: Build, sign, and save Win32 cliente
+      uses: ./.github/actions/build-edition
+      with:
+        platform: windows
+        arch: x86
+        edition: cliente
+    - name: Build, sign, and save Win32 suporte
+      uses: ./.github/actions/build-edition
+      with:
+        platform: windows
+        arch: x86
+        edition: suporte

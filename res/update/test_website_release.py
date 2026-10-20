@@ -128,6 +128,19 @@ class WebsiteReleaseTests(unittest.TestCase):
         data = json.loads((self.public / "updates/suporte/v1.5.2/bgdesk-update.json").read_text())
         self.assertEqual({item["format"] for item in data["artifacts"]}, {"exe", "msi", "dmg"})
 
+    def test_download_page_shows_only_windows_setup_while_signed_feed_keeps_the_updater(self):
+        updater, setup = self.root / 'update.exe', self.root / 'setup.exe'
+        updater.write_bytes(b'native updater')
+        setup.write_bytes(b'Inno Setup')
+        self.prepare(extra=('--root-artifacts', '--artifact', 'windows', 'x86_64', 'exe', str(updater),
+                            '--artifact', 'windows', 'x86_64', 'inno-exe', str(setup)))
+        directory = self.public / 'updates/suporte/v1.5.2'
+        manifest = json.loads((directory / 'bgdesk-update.json').read_text())
+        self.assertEqual({a['format'] for a in manifest['artifacts']}, {'exe', 'inno-exe', 'dmg'})
+        page = (directory / 'index.html').read_text()
+        self.assertIn('bgdesk-suporte-win64.exe', page)
+        self.assertNotIn('bgdesk-suporte-update-win64.exe', page)
+
     def test_arch_compound_extension_is_signed_and_wrong_extension_rejected(self):
         package = self.root / 'bgdesk-suporte-x86_64.pkg.tar.zst'
         package.write_bytes(b'Arch package')

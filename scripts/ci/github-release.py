@@ -20,6 +20,11 @@ def digest(path):
         return hashlib.file_digest(handle, 'sha256').hexdigest()
 
 
+def is_public_package(record):
+    # Native updater EXEs remain in Actions/R2, never in the public release downloads.
+    return record['platform'] != 'windows' or record['format'] == 'inno-exe'
+
+
 def read_edition(manifest):
     records = json.loads(manifest.read_text())
     if not records:
@@ -37,7 +42,10 @@ def read_edition(manifest):
         path = manifest.parent / name
         if not path.is_file() or path.stat().st_size != record['size'] or digest(path) != record['sha256']:
             raise ValueError(f'Asset hash/size mismatch: {name}')
-        files.append(path)
+        if is_public_package(record):
+            files.append(path)
+    if not files:
+        raise ValueError('No public installer was generated')
     return next(iter(selectors)), files
 
 
@@ -113,7 +121,10 @@ def main():
         tag = f'v{args.version}'
         existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {args.version}',
                                   'Todas as plataformas validadas e publicação R2 concluída.', draft=True)
-        upload_files(args.repo, tag, existing, [path for _, path in records])
+        public_files = [path for record, path in records if is_public_package(record)]
+        if {asset['name'] for asset in existing['assets']} - {path.name for path in public_files}:
+            raise ValueError('Stable release contains unexpected assets; refusing to publish non-Setup Windows packages')
+        upload_files(args.repo, tag, existing, public_files)
         gh('release', 'edit', tag, '--repo', args.repo, '--draft=false', '--prerelease=false', '--latest')
     else:
         if not args.manifest or not args.run_id or not args.run_id.isdigit() or not args.attempt.isdigit():
@@ -126,7 +137,8 @@ def main():
         existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {version} — {platform} {arch}', notes, draft=False)
         with tempfile.TemporaryDirectory() as temp:
             manifest_copy = Path(temp) / f'artifacts-{edition}.json'
-            manifest_copy.write_bytes(args.manifest.read_bytes())
+            public_records = [r for r in json.loads(args.manifest.read_text()) if is_public_package(r)]
+            manifest_copy.write_text(json.dumps(public_records, indent=2) + '\n')
             checksums = Path(temp) / f'SHA256SUMS-{edition}.txt'
             checksums.write_text(''.join(f'{digest(path)}  {path.name}\n' for path in files))
             upload_files(args.repo, tag, existing, [*files, manifest_copy, checksums])

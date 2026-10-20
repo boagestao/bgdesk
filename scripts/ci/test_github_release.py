@@ -80,3 +80,65 @@ class GitHubReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Incomplete release'):
                 release.main()
         gh.assert_not_called()
+
+    def windows_manifest(self, arch):
+        records = []
+        for fmt, suffix in [('exe', ''), ('inno-exe', '-setup')]:
+            path = self.root / f'bgdesk-cliente-windows-{arch}{suffix}.exe'
+            path.write_bytes(('signed ' + fmt).encode())
+            records.append(dict(version='1.5.2', edition='cliente', platform='windows', arch=arch,
+                                format=fmt, file_name=path.name, size=path.stat().st_size,
+                                sha256=release.digest(path)))
+        self.manifest.write_text(json.dumps(records))
+        return records
+
+    def test_windows_32_and_64_releases_expose_only_setup_and_matching_public_metadata(self):
+        for arch in ('x86', 'x86_64'):
+            records = self.windows_manifest(arch)
+            uploads = []
+            def capture(repo, tag, existing, files):
+                uploads.extend(path.name for path in files)
+                manifest = next(p for p in files if p.name == 'artifacts-cliente.json')
+                self.assertEqual(json.loads(manifest.read_text()), [records[1]])
+                checksums = next(p for p in files if p.name == 'SHA256SUMS-cliente.txt')
+                self.assertEqual(checksums.read_text(), f"{records[1]['sha256']}  {records[1]['file_name']}\n")
+            with patch('sys.argv', ['release', '--manifest', str(self.manifest), '--commit', 'a' * 40,
+                                    '--run-id', '123']), \
+                 patch.object(release, 'ensure_release', return_value={'assets': []}), \
+                 patch.object(release, 'upload_files', side_effect=capture):
+                release.main()
+            self.assertIn(records[1]['file_name'], uploads)
+            self.assertNotIn(records[0]['file_name'], uploads)
+            # Filtering public downloads does not permit a corrupt internal updater.
+            (self.root / records[0]['file_name']).write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'mismatch'):
+                release.read_edition(self.manifest)
+
+    def test_stable_validates_all_26_packages_but_uploads_only_22_public_installers(self):
+        from preflight import artifact_targets
+        for platform, arch in artifact_targets():
+            for edition in ('cliente', 'suporte'):
+                directory = self.root / f'{platform}-{arch}-{edition}'
+                directory.mkdir()
+                formats = (('exe', 'inno-exe') if platform == 'windows' else ('dmg',) if platform == 'macos'
+                           else ('deb', 'rpm', 'AppImage', 'pkg.tar.zst') if arch == 'x86_64'
+                           else ('deb', 'rpm', 'AppImage'))
+                records = []
+                for fmt in formats:
+                    name = f'{edition}-{platform}-{arch}-{fmt}.bin'
+                    path = directory / name
+                    path.write_bytes(name.encode())
+                    records.append(dict(platform=platform, arch=arch, edition=edition, format=fmt,
+                        version='1.5.2', file_name=name, size=path.stat().st_size, sha256=release.digest(path)))
+                (directory / 'artifacts.json').write_text(json.dumps(records))
+        self.manifest.unlink()
+        with patch('sys.argv', ['release', '--stable', '--version', '1.5.2', '--artifacts', str(self.root),
+                                '--commit', 'a' * 40]), \
+             patch.object(release, 'ensure_release', return_value={'assets': []}), \
+             patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'):
+            release.main()
+        files = upload.call_args.args[-1]
+        self.assertEqual(len(files), 22)
+        windows = [p for p in files if '-windows-' in p.name]
+        self.assertEqual(len(windows), 4)
+        self.assertTrue(all('inno-exe' in p.name for p in windows))

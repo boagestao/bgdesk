@@ -19,14 +19,27 @@ TARGETS = [
 ]
 
 def distribution_matrix(platforms):
-    # Validate Win32 separately before adding it to the complete release matrix.
     if platforms == 'windows-x86':
         return {'include': [dict(platform='windows', arch='x86', runner='windows-2022')]}
     return {"include": [
-        dict(platform=platform, arch=arch, runner=runner)
+        dict(platform=platform, arch=arch, runner=runner,
+             **({'win32': True} if platform == 'windows' and platforms in ('all', 'windows') else {}))
         for platform, arch, runner in TARGETS
         if platforms == "all" or platforms in (platform, f"{platform}-{arch}")
     ]}
+
+
+def artifact_targets(platforms='all'):
+    """Logical output architectures; Windows shares one runner for both."""
+    for target in distribution_matrix(platforms)['include']:
+        yield target['platform'], target['arch']
+        if target.get('win32'):
+            yield 'windows', 'x86'
+
+
+def complete_build_job_names():
+    return {f"{t['platform']} / {t['arch']}{' + x86' if t.get('win32') else ''} (cliente + suporte)"
+            for t in distribution_matrix('all')['include']}
 
 
 def matrix(platforms):
@@ -88,7 +101,7 @@ def main():
         for key, value in outputs.items():
             handle.write(f"{key}={value}\n")
     runners = len(matrix(platforms)['include'])
-    print(f"BGDesk {version}: {runners} runners, {runners * 2} builds (cliente then suporte); publication={publish}")
+    print(f"BGDesk {version}: {runners} runners, {len(list(artifact_targets(platforms))) * 2} builds (cliente then suporte); publication={publish}")
 
 
 if __name__ == "__main__":

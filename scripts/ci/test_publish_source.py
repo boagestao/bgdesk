@@ -13,8 +13,7 @@ class PublishSourceTests(unittest.TestCase):
         self.run = dict(status='completed', conclusion='failure', head_branch='main',
                         path='.github/workflows/release.yml', head_sha='a' * 40,
                         head_repository={'full_name': 'boagestao/bgdesk'})
-        names = ['preflight', 'flutter bridge'] + [
-            f'{platform} / {arch} (cliente + suporte)' for platform, arch, _ in source.TARGETS]
+        names = ['preflight', 'flutter bridge'] + sorted(source.complete_build_job_names())
         self.jobs = [dict(name=name, status='completed', conclusion='success') for name in names]
         self.jobs.append(dict(name='publish', status='completed', conclusion='failure'))
 
@@ -35,3 +34,14 @@ class PublishSourceTests(unittest.TestCase):
             source.validate(self.run, jobs, 'boagestao/bgdesk')
         with self.assertRaisesRegex(ValueError, 'complete build matrix'):
             source.validate(self.run, self.jobs[1:], 'boagestao/bgdesk')
+
+    def test_older_windows_x64_only_matrix_cannot_publish_as_the_complete_release(self):
+        jobs = copy.deepcopy(self.jobs)
+        for job in jobs:
+            job['name'] = job['name'].replace('x86_64 + x86', 'x86_64')
+        with self.assertRaisesRegex(ValueError, 'complete build matrix'):
+            source.validate(self.run, jobs, 'boagestao/bgdesk')
+
+    def test_bridge_may_be_skipped_when_reusing_completed_packages(self):
+        self.jobs[1]['conclusion'] = 'skipped'
+        self.assertEqual(source.validate(self.run, self.jobs, 'boagestao/bgdesk'), 'a' * 40)

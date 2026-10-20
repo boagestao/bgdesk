@@ -1,1 +1,4 @@
 * text=auto
+
+# Keep the pinned upstream patch byte-for-byte, including unified-diff context spaces.
+res/vcpkg/mfx-dispatch/fix-missing-cstdint-import-d6241243f85a0d947bdfe813006686a930edef24.patch -text whitespace=-blank-at-eol

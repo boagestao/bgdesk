@@ -8,7 +8,7 @@ import re
 import subprocess
 import tomllib
 
-from preflight import TARGETS
+from preflight import complete_build_job_names
 
 
 def validate(run, jobs, repository):
@@ -16,12 +16,14 @@ def validate(run, jobs, repository):
             or run.get('head_branch') != 'main' or run.get('path') != '.github/workflows/release.yml'
             or run.get('head_repository', {}).get('full_name') != repository):
         raise ValueError('Source must be a completed main release run from this repository')
-    expected = {f'{platform} / {arch} (cliente + suporte)' for platform, arch, _ in TARGETS}
+    expected = complete_build_job_names()
     expected |= {'preflight', 'flutter bridge'}
     selected = [job for job in jobs if job['name'] != 'publish']
     if len(selected) != len(expected) or {job['name'] for job in selected} != expected:
         raise ValueError('Source run does not contain the complete build matrix')
-    if any(job['status'] != 'completed' or job['conclusion'] != 'success' for job in selected):
+    if any(job['status'] != 'completed' or (job['conclusion'] != 'success'
+           and not (job['name'] == 'flutter bridge' and job['conclusion'] == 'skipped'))
+           for job in selected):
         raise ValueError('Every source build must have completed successfully')
     commit = run.get('head_sha', '')
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
@@ -54,7 +56,7 @@ def main():
         raise ValueError('Source version differs from the current publication tools; refusing to mix releases')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
         handle.write(f'commit={commit}\nversion={version}\n')
-    print(f'All five source builds passed; reusing BGDesk {version} from {commit[:12]}')
+    print(f'All five source jobs, including Windows x64+x86, passed; reusing BGDesk {version} from {commit[:12]}')
 
 
 if __name__ == '__main__':

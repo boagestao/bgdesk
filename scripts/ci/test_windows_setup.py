@@ -87,6 +87,26 @@ exit 98
         self.assertIn('SDK Flutter Windows completo', result.stderr)
         self.assertEqual((self.sdk / 'bin/flutter').read_bytes(), original)
 
+    def test_ci_reconciles_all_x64_dependencies_even_if_host_ffmpeg_is_cached(self):
+        vcpkg = self.root / 'vcpkg'
+        header = vcpkg / 'installed/x64-windows-static/include/libavutil/attributes.h'
+        header.parent.mkdir(parents=True)
+        header.touch()
+        bash = self.bin / 'bash'
+        bash.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_CURL_LOG"\n')
+        bash.chmod(0o755)
+        env = dict(self.env, VCPKG_ROOT=str(vcpkg))
+        def reconcile():
+            return subprocess.run(['/bin/bash', '-c',
+                'source "$BGDESK_SETUP_SCRIPT"; install_vcpkg_dependencies'],
+                env=env, text=True, capture_output=True)
+        self.assertEqual(reconcile().returncode, 0)
+        self.assertFalse((self.root / 'downloads').exists())
+        env['BGDESK_VERIFY_VCPKG_MANIFEST'] = '1'
+        result = reconcile()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('install-vcpkg.sh', (self.root / 'downloads').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

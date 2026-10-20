@@ -86,7 +86,7 @@ def release_page(version, edition, artifacts):
         f'<li><a href="{html.escape(item["url"], quote=True)}">'
         f'{html.escape(item["platform"])} / {html.escape(item["arch"])} '
         f'({html.escape(item["format"])})</a></li>'
-        for item in artifacts
+        for item in artifacts if item['platform'] != 'windows' or item['format'] == 'inno-exe'
     )
     return (
         '<!doctype html><html lang="pt-BR"><meta charset="utf-8">'

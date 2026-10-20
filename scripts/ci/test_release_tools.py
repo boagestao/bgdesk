@@ -55,11 +55,11 @@ class ReleaseToolsTests(unittest.TestCase):
     def root_packages(self):
         site = self.site()
         records = []
-        for target in plan.distribution_matrix('all')['include']:
+        for platform, arch in plan.artifact_targets():
             for edition in ('cliente', 'suporte'):
-                for fmt, _ in collect.specs(target['platform'], target['arch'], edition):
-                    record = dict(edition=edition, platform=target['platform'], arch=target['arch'], format=fmt)
-                    name = r2.root_artifact_name(edition, target['platform'], target['arch'], fmt)
+                for fmt, _ in collect.specs(platform, arch, edition):
+                    record = dict(edition=edition, platform=platform, arch=arch, format=fmt)
+                    name = r2.root_artifact_name(edition, platform, arch, fmt)
                     path = site / 'updates' / edition / 'v1.5.2' / name
                     path.write_bytes(('package-' + name).encode())
                     record.update(file_name='versioned-' + name, size=path.stat().st_size,
@@ -72,17 +72,17 @@ class ReleaseToolsTests(unittest.TestCase):
         site, records = self.root_packages()
         s3, verified = FakeS3(), []
         def verify(origin, key, path, small=False):
-            if len(verified) < 22:
-                self.assertEqual(len(s3.writes), 22)
+            if len(verified) < 26:
+                self.assertEqual(len(s3.writes), 26)
                 self.assertNotIn('/', key)
             verified.append(key)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
                    verify=verify, root_artifacts=True)
         packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst'))]
-        self.assertEqual(len(packages), 22)
+        self.assertEqual(len(packages), 26)
         self.assertTrue(all('/' not in key for key in packages))
         self.assertTrue(all(s3.objects[key]['cache'] == 'no-store, max-age=0' for key in packages))
-        self.assertEqual(set(packages), set(verified[:22]))
+        self.assertEqual(set(packages), set(verified[:26]))
         self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
         writes = len(s3.writes)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
@@ -273,8 +273,8 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertEqual(len(s3.writes), 2)
 
     def test_complete_artifact_matrix_and_hashes_are_required(self):
-        entries = [dict(target, edition=edition)
-                   for target in plan.distribution_matrix("all")["include"]
+        entries = [dict(platform=platform, arch=arch, edition=edition)
+                   for platform, arch in plan.artifact_targets()
                    for edition in ("cliente", "suporte")]
         for entry in entries:
             directory = self.root / f"{entry['platform']}-{entry['arch']}-{entry['edition']}"
@@ -288,7 +288,7 @@ class ReleaseToolsTests(unittest.TestCase):
                                     format=fmt, version="1.5.2", file_name=name, size=10,
                                     sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
             (directory / "artifacts.json").write_text(json.dumps(records))
-        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 22)
+        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 26)
         chosen = next(self.root.glob("*/artifacts.json"))
         saved = chosen.read_bytes()
         chosen.unlink()
@@ -370,8 +370,7 @@ class ReleaseToolsTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         (self.root / 'Cargo.toml').write_text('[package]\nversion = "1.5.2"\n')
         artifacts = self.root / 'artifacts'
-        for target in plan.distribution_matrix('all')['include']:
-            platform, arch = target['platform'], target['arch']
+        for platform, arch in plan.artifact_targets():
             for edition in ('cliente', 'suporte'):
                 mode = '1' if edition == 'cliente' else '0'
                 local_platform = 'macOS' if platform == 'macos' else platform
@@ -391,7 +390,7 @@ class ReleaseToolsTests(unittest.TestCase):
                     str(artifacts / f'build-{platform}-{arch}-{edition}'),
                 ], cwd=self.root, check=True)
         records = r2.read_records(artifacts, '1.5.2')
-        self.assertEqual(len(records), 22)
+        self.assertEqual(len(records), 26)
         for record, path in records:
             self.assertEqual(path.read_bytes(),
                              f"{record['platform']}/{record['arch']}/{record['edition']}/{record['format']}".encode())

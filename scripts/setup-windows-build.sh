@@ -231,7 +231,7 @@ install_vcpkg_dependencies() {
     return 0
   fi
   local ffmpeg_hdr="$VCPKG_ROOT/installed/$VCPKG_TRIPLET/include/libavutil/attributes.h"
-  if [[ -f "$ffmpeg_hdr" ]]; then
+  if [[ -f "$ffmpeg_hdr" && "${BGDESK_VERIFY_VCPKG_MANIFEST:-0}" != 1 ]]; then
     log "dependências vcpkg já instaladas ($VCPKG_TRIPLET)"
     return 0
   fi

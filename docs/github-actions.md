@@ -3,13 +3,14 @@
 O workflow de distribuição é `.github/workflows/release.yml`, **BGDesk - Build and
 publish**. Cada push na `main` compila cliente e suporte do alvo selecionado. A variável
 `BGDESK_RELEASE_TARGET` controla o alvo temporário de validação; ausente ou
-`all`, ativa as cinco plataformas/arquiteturas. Durante a validação individual
+`all`, ativa as cinco máquinas. Durante a validação individual
 o deploy R2 fica desativado. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
-O build Apple Silicon já passou. A matriz volta a ter as cinco máquinas, e a
-publicação continua exigindo os 22 arquivos das duas edições. Um conjunto
+Todas as arquiteturas, incluindo Win32, passaram individualmente. A matriz mantém
+cinco máquinas e exige 26 pacotes internos das duas edições. A release pública
+tem 22 instaladores: os quatro EXEs Windows são somente Setup (32/64 bits). Um conjunto
 incompleto não substitui o `latest.json`.
 
 O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
@@ -23,7 +24,7 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
 
 - macOS Apple Silicon e Intel: DMGs assinados, notarizados e verificados pelo
   mesmo `build.sh` / `package-macos.sh` usado no Mac local.
-- Windows x64: instalador Inno Setup e um executável separado para atualização,
+- Windows x64 e x86, na mesma máquina: instalador Inno Setup e um executável separado para atualização,
   que aceita `--update`. Ambos recebem assinatura Authenticode; o aplicativo
   interno também é assinado antes de empacotar.
 - Linux x64 e ARM64: `.deb`, `.rpm` e AppImage, pelas imagens Docker do projeto.
@@ -40,7 +41,7 @@ plataforma e arquitetura. As duas edições compartilham downloads e dependênci
 compiladas do Cargo; no Linux também usam a mesma imagem e os mesmos volumes
 Docker. Os artefatos de cada edição são guardados separadamente antes de iniciar
 a próxima, sem apagar o cache de compilação entre elas. A publicação continua
-exigindo os 22 arquivos das duas edições em todas as plataformas.
+exigindo os 26 arquivos internos das duas edições em todas as plataformas.
 
 No macOS, cada edição guarda um checkpoint fora do diretório temporário do DMG:
 `app.tar` do app compilado (links simbólicos e permissões preservados), o DMG
@@ -155,7 +156,7 @@ releases. Mudar de domínio exige manter os canais anteriores acessíveis.
 1. Atualize a versão em `Cargo.toml`, `flutter/pubspec.yaml` (preservando ou
    aumentando o número após `+`) e `libs/portable/Cargo.toml`.
 2. Faça push na `main`. Todos os builds precisam terminar com sucesso.
-3. O job de publicação confere os 22 artefatos esperados, seus tamanhos e
+3. O job de publicação confere os 26 artefatos internos esperados, seus tamanhos e
    hashes. O manifesto seleciona o pacote Windows nativo para atualização;
    o Inno Setup fica identificado como `inno-exe`, para download inicial.
 4. Assina os manifestos das duas edições e envia cada pacote uma única vez para
@@ -191,7 +192,7 @@ evitar uma execução antiga anunciar uma versão depois de outra mais recente.
 Os artefatos ficam disponíveis na execução por 14 dias, inclusive nos testes
 manuais sem publicação. O download Linux é publicado, mas a instalação automática
 interna continua limitada a Windows/macOS, conforme o atualizador existente.
-Windows ARM64/32 bits, Android e iOS não fazem parte desta matriz de distribuição.
+Windows ARM64, Android e iOS não fazem parte desta matriz de distribuição.
 
 ## Validar antes do primeiro push de distribuição
 
@@ -259,7 +260,7 @@ uma senha automaticamente: configure a autenticação de acesso no aplicativo.
 
 Os downloads estáveis são `https://download.bgdesk.com/bgdesk-cliente-x86_64.pkg.tar.zst`
 e `https://download.bgdesk.com/bgdesk-suporte-x86_64.pkg.tar.zst`. Ambos entram no
-manifesto assinado e na verificação de completude dos 22 arquivos antes de ativar
+manifesto assinado e na verificação de completude dos 26 arquivos antes de ativar
 os feeds. Arch Linux ARM não está incluído neste pacote x86_64.
 
 ## Validação individual e Releases imediatas
@@ -270,21 +271,43 @@ Cada alvo continua compilando cliente e suporte em sequência na mesma máquina.
 Linux x64, Linux ARM, macOS Intel, macOS ARM e Windows x64 já passaram; o deploy
 completo 1.5.1 foi validado, incluindo os 22 arquivos e feeds assinados.
 
-`windows-x86` inicia agora a validação Win32, com `publish=false`. Flutter não
+`windows-x86` permite validar somente Win32, com `publish=false`. Flutter não
 oferece Windows de 32 bits; esse alvo usa a interface Sciter existente, incluindo
 a edição cliente com `incoming-only`. O runner usa Rust nightly-2026-09-01 e
 `i686-pc-windows-msvc`, dependências `x86-windows-static`, binding Sciter fixado
 no commit `674e07d3066ca9a92ced3816203ab6b652629d1e` e DLL fixada por commit e
 SHA256. A troca do binding ocorre apenas no checkout descartável Win32 e mantém
-todas as outras dependências do lockfile. Não instala Flutter nesse runner.
+todas as outras dependências do lockfile. O alvo isolado não instala Flutter.
+Em `all`, o mesmo runner termina x64 cliente/suporte com Flutter e Rust estável,
+depois prepara o target i686 com nightly e executa Win32 cliente/suporte.
+As saídas e manifests ficam separados por plataforma, arquitetura e edição.
 
 São produzidos `bgdesk-<edição>-win32.exe` (Inno com serviço unattended) e
 `bgdesk-<edição>-update-win32.exe` (atualizador nativo), ambos assinados e com
 timestamp. A arquitetura PE32, versão do executável e abertura de janela Sciter
 são verificadas antes de salvar os artefatos e publicar a pré-release.
-Win32 ainda não entra em `all` ou no R2: primeiro precisam passar ambas as
-edições. A integração final usará nova versão para preservar a imutabilidade
-da 1.5.1 e manter os cinco runners, incluindo as arquiteturas Windows em sequência.
+Win32 cliente e suporte passaram no run 39428395944, incluindo assinatura,
+janela Sciter e conferência dos quatro pacotes. Win32 está integrado à matriz
+`all` e à distribuição R2. A versão do aplicativo acompanha o RustDesk upstream
+(atualmente 1.5.1); não deve ser incrementada para releases próprias do BGDesk.
+A publicação existente da 1.5.1 é preservada pelo bloqueio de imutabilidade. São cinco runners,
+12 conjuntos de artefatos e 26 pacotes internos. O cache vcpkg é reconciliado
+para cada target antes de compilar, sem confiar apenas no header FFmpeg host.
+
+Antes de preparar os compiladores, o preflight consulta as últimas 100 execuções
+encerradas de `release.yml` na main. Para cada plataforma/arquitetura, a versão
+em `Cargo.toml` do commit original deve ser igual à versão solicitada. Conforme
+política do projeto, diferenças de commit não invalidam uma build da mesma versão.
+O job daquele alvo precisa ter passado por completo e os artefatos de cliente e
+suporte precisam estar disponíveis e não expirados. Um erro em outro alvo ou na
+publicação não invalida o alvo aprovado. Windows x64 e Win32 são procurados
+separadamente, mas continuam no mesmo runner. Sem fonte aprovada, o alvo compila.
+
+Os pacotes reaproveitados são baixados, validados por versão/seletores/SHA256/tamanho
+e enviados como artefatos da execução atual com `build-source.json` registrando
+commit e run originais. As pré-releases mantêm o commit original dos binários.
+Se todos os alvos forem reaproveitados, até a geração do bridge é pulada.
+A release estável e os feeds já publicados não são substituídos por esse mecanismo.
 
 Assim que uma edição termina, seu instalador é salvo como artefato do Actions
 **e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome
@@ -293,8 +316,12 @@ acrescenta seus arquivos à mesma pré-release quando termina. Os nomes são ún
 com manifests e SHA256SUMS separados por edição; hashes e tamanhos são verificados
 antes do envio e arquivos existentes com bytes diferentes nunca são sobrescritos.
 Essas pré-releases ficam visíveis em Releases mesmo se outro alvo falhar. Elas
-não alteram o feed de atualização automática. Após todos os 22 pacotes passarem e
-a publicação R2 terminar, é publicada a release estável `v<versão>` com os arquivos.
+não alteram o feed de atualização automática. Os EXEs nativos de atualização
+ficam nos artefatos Actions e na raiz do R2, mas as pré-releases e a release
+estável do GitHub expõem somente Setups Windows. Os manifests e checksums
+públicos dessas pré-releases listam somente os arquivos expostos.
+Após todos os 26 pacotes internos passarem e o R2 terminar, a release estável
+`v<versão>` publica 22 arquivos, incluindo quatro Setups Windows.
 
 A assinatura Windows informa separadamente exportação do certificado, confiança
 na CA temporária, assinatura, timestamp RFC3161 e verificação Authenticode.
@@ -315,8 +342,8 @@ de assinatura/timestamp continuam obrigatórios.
 Se os cinco builds passaram e apenas `publish` falhou, use **BGDesk - Publish
 existing packages** (`publish-existing.yml`) e informe `source_run`. O workflow
 confere que o run de origem é da `main`, deste repositório, que encerrou e que
-todos os cinco builds, preflight e bridge passaram. Baixa os dez conjuntos de
-artefatos e exige os mesmos 22 arquivos, com hashes e tamanhos válidos. Não instala
+todos os cinco jobs, incluindo Windows x64+x86, preflight e bridge passaram.
+Baixa os 12 conjuntos de artefatos e exige os mesmos 26 arquivos, com hashes e tamanhos válidos. Não instala
 Rust, Flutter ou vcpkg nem recompila.
 
 As ferramentas corrigidas de publicação vêm da `main`; versão, commit e data dos
