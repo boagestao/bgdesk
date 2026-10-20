@@ -302,6 +302,10 @@ O job daquele alvo precisa ter passado por completo e os artefatos de cliente e
 suporte precisam estar disponíveis e não expirados. Um erro em outro alvo ou na
 publicação não invalida o alvo aprovado. Windows x64 e Win32 são procurados
 separadamente, mas continuam no mesmo runner. Sem fonte aprovada, o alvo compila.
+Antes de marcar o alvo como reaproveitável, o preflight baixa os arquivos das duas
+edições e verifica os pacotes completos, incluindo hash e tamanho. No Windows,
+também exige o conteúdo de um Setup Inno em cada edição: apenas o nome de um
+artefato ou um EXE nativo não permite pular a compilação.
 
 Os pacotes reaproveitados são baixados, validados por versão/seletores/SHA256/tamanho
 e enviados como artefatos da execução atual com `build-source.json` registrando
@@ -310,6 +314,14 @@ ou tags: a publicação original continua como referência, sem duplicar os mesm
 binários em uma nova pré-release.
 Se todos os alvos forem reaproveitados, até a geração do bridge é pulada.
 A release estável e os feeds já publicados não são substituídos por esse mecanismo.
+O job de publicação estável, entretanto, continua obrigatório mesmo quando todos
+os pacotes forem reaproveitados e a versão já existir. O marcador de versão R2
+controla somente a publicação de novos feeds/R2. No GitHub, a sincronização de
+uma versão já publicada confere os 26 pacotes internos e os 22 downloads públicos,
+envia os Setups ausentes de cliente/suporte x86/x64 e remove apenas os atualizadores
+nativos correspondentes dos assets públicos. Verifica os bytes existentes antes
+de qualquer alteração e mantém o tag/commit de destino original. Não reescreve
+os feeds ou metadados assinados da versão já anunciada no R2.
 
 Quando uma edição é compilada pela primeira vez, seu instalador é salvo como artefato do Actions
 **e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome

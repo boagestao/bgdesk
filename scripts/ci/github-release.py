@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Expose each completed edition immediately; publish a stable release only after R2."""
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import tomllib
 
 
 def gh(*arguments, check=True):
@@ -100,10 +102,44 @@ def upload_files(repository, tag, existing, files):
     print(f'Packages available: https://github.com/{repository}/releases/tag/{tag}')
 
 
+def reconcile_stable(repository, version, records):
+    """Complete an existing version without replacing its tag or package bytes."""
+    tag = f'v{version}'
+    existing = release(repository, tag)
+    if not existing or existing.get('draft') or existing.get('prerelease'):
+        raise ValueError('Expected an existing published stable release')
+    source = json.loads(gh('api', f'repos/{repository}/contents/Cargo.toml?ref={tag}').stdout)
+    if tomllib.loads(base64.b64decode(source['content']).decode('utf-8'))['package']['version'] != version:
+        raise ValueError('Existing stable tag belongs to another application version')
+    public = {path.name: path for record, path in records if is_public_package(record)}
+    internal = {path.name: path for record, path in records if not is_public_package(record)}
+    assets = {asset['name']: asset for asset in existing['assets']}
+    extras = assets.keys() - public.keys()
+    if extras - internal.keys():
+        raise ValueError('Stable release contains unexpected assets; refusing to remove unrelated files')
+    # Verify ALL existing bytes before uploads/deletions, including the legacy
+    # native updater assets which must leave the public Windows downloads.
+    upload_files(repository, tag, existing,
+                 [public.get(name, internal.get(name)) for name in assets])
+    upload_files(repository, tag, existing, list(public.values()))
+    for name in sorted(extras):
+        gh('api', '--method', 'DELETE', f"repos/{repository}/releases/assets/{assets[name]['id']}")
+    final = release(repository, tag)
+    final_assets = {asset['name']: asset for asset in final['assets']}
+    if final_assets.keys() != public.keys():
+        raise ValueError('Stable release is missing public installers or contains extra assets')
+    upload_files(repository, tag, final, list(public.values()))
+    if final['target_commitish'] != existing['target_commitish']:
+        raise ValueError('Existing stable target changed during synchronization')
+    print(f'Stable {tag} verified: {len(public)} public packages, including all four Windows Setups. Existing tag preserved.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path)
     parser.add_argument('--stable', action='store_true')
+    parser.add_argument('--reconcile-existing', action='store_true',
+                        help='complete an already published stable version without replacing existing bytes/tag')
     parser.add_argument('--artifacts', type=Path, default=Path('artifacts'))
     parser.add_argument('--version')
     parser.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY', 'boagestao/bgdesk'))
@@ -118,6 +154,9 @@ def main():
         r2 = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(r2)
         records = r2.read_records(args.artifacts, args.version)
+        if args.reconcile_existing:
+            reconcile_stable(args.repo, args.version, records)
+            return
         tag = f'v{args.version}'
         existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {args.version}',
                                   'Todas as plataformas validadas e publicação R2 concluída.', draft=True)

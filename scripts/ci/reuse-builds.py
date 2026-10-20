@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import tomllib
 
 
@@ -42,7 +43,8 @@ def approved_target(jobs, artifacts, platform, arch):
     return passed and all(f'build-{platform}-{arch}-{edition}' in available for edition in EDITIONS)
 
 
-def make_plan(matrix, version, repository, query=api):
+def make_plan(matrix, version, repository, query=api, validate=None):
+    validate = validate or validate_candidate
     wanted = {(t['platform'], t['arch']) for t in matrix['include']}
     if any(t.get('win32') for t in matrix['include']):
         wanted.add(('windows', 'x86'))
@@ -61,7 +63,8 @@ def make_plan(matrix, version, repository, query=api):
         jobs = [job for page in query(f'repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100', paginate=True) for job in page['jobs']]
         artifacts = [a for page in query(f'repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100', paginate=True) for a in page['artifacts']]
         for target in wanted - found.keys():
-            if approved_target(jobs, artifacts, *target):
+            if (approved_target(jobs, artifacts, *target)
+                    and validate(repository, str(run_id), version, *target)):
                 found[target] = dict(run=str(run_id), commit=commit)
         if wanted == found.keys():
             break
@@ -93,7 +96,36 @@ def validate_directory(directory, version, platform, arch, edition):
             digest = hashlib.file_digest(handle, 'sha256').hexdigest()
         if path.stat().st_size != record['size'] or digest != record['sha256']:
             raise ValueError('Reused artifact hash/size mismatch')
+        if platform == 'windows' and record['format'] == 'inno-exe':
+            data = path.read_bytes()
+            if not data.startswith(b'MZ') or b'Inno Setup Setup Data' not in data:
+                raise ValueError('Reused Windows package is not an Inno Setup installer')
     return records
+
+
+def download_edition(repository, run_id, platform, arch, edition, directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(['gh', 'run', 'download', run_id, '--repo', repository,
+                             '--name', f'build-{platform}-{arch}-{edition}', '--dir', str(directory)],
+                            capture_output=True, text=True, encoding='utf-8', timeout=600)
+    if result.returncode:
+        # gh may include a signed download URL in stderr; never print it.
+        raise RuntimeError('Cannot download the approved build artifacts')
+
+
+def validate_candidate(repository, run_id, version, platform, arch):
+    # Artifact names alone do not prove that the required installers exist.
+    # Validate both editions before deciding to skip their compilation.
+    with tempfile.TemporaryDirectory(prefix='bgdesk-reuse-check-') as temporary:
+        try:
+            for edition in EDITIONS:
+                directory = Path(temporary) / edition
+                download_edition(repository, run_id, platform, arch, edition, directory)
+                validate_directory(directory, version, platform, arch, edition)
+        except (ValueError, OSError, RuntimeError, KeyError, TypeError):
+            print(f'Rejecting incomplete/invalid {platform}/{arch} packages from run {run_id}.')
+            return False
+    return True
 
 
 def restore(repository, run_id, commit, version, platform, arch):
@@ -108,13 +140,7 @@ def restore(repository, run_id, commit, version, platform, arch):
         raise ValueError('Source target did not pass or its artifacts expired')
     for edition in EDITIONS:
         directory = Path(f'release-artifacts/{platform}-{arch}-{edition}')
-        directory.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(['gh', 'run', 'download', run_id, '--repo', repository,
-                                 '--name', f'build-{platform}-{arch}-{edition}', '--dir', str(directory)],
-                                capture_output=True, text=True, encoding='utf-8', timeout=600)
-        if result.returncode:
-            # gh may include a signed download URL in stderr; never print it.
-            raise RuntimeError('Cannot download the approved build artifacts')
+        download_edition(repository, run_id, platform, arch, edition, directory)
         validate_directory(directory, version, platform, arch, edition)
         provenance_path = directory / 'build-source.json'
         provenance = dict(

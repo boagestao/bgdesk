@@ -351,7 +351,7 @@ jobs:
 
   publish:
     needs: [preflight, build]
-    if: needs.preflight.outputs.publish == 'true' && needs.preflight.outputs.new_release == 'true'
+    if: needs.preflight.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -369,6 +369,7 @@ jobs:
           path: artifacts
       - run: python -m pip install 'cryptography==50.0.0' 'boto3==1.40.55'
       - name: Sign, upload to R2, verify public URLs, and announce release
+        if: needs.preflight.outputs.new_release == 'true'
         env:
           BGDESK_UPDATE_SIGNING_KEY: ${{ secrets.BGDESK_UPDATE_SIGNING_KEY }}
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
@@ -377,7 +378,12 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: python scripts/ci/r2-publish.py --version '${{ needs.preflight.outputs.version }}'
-      - name: Publish complete stable GitHub Release after R2 verification
+      - name: Publish or complete stable GitHub Release, including both Windows editions
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/ci/github-release.py --stable --version '${{ needs.preflight.outputs.version }}'
+          NEW_RELEASE: ${{ needs.preflight.outputs.new_release }}
+        shell: bash
+        run: |
+          args=(--stable --version '${{ needs.preflight.outputs.version }}')
+          [[ "$NEW_RELEASE" == true ]] || args+=(--reconcile-existing)
+          python scripts/ci/github-release.py "${args[@]}"

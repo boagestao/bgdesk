@@ -1,4 +1,6 @@
 import hashlib
+import base64
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -142,3 +144,61 @@ class GitHubReleaseTests(unittest.TestCase):
         windows = [p for p in files if '-windows-' in p.name]
         self.assertEqual(len(windows), 4)
         self.assertTrue(all('inno-exe' in p.name for p in windows))
+
+    def existing_stable_fixture(self, missing):
+        records, assets = [], []
+        for arch in ('x86', 'x86_64'):
+            for edition in ('cliente', 'suporte'):
+                for fmt, suffix in [('exe', ''), ('inno-exe', '-setup')]:
+                    path = self.root / f'bgdesk-{edition}-1.5.1-windows-{arch}{suffix}.exe'
+                    path.write_bytes(path.name.encode())
+                    record = dict(platform='windows', arch=arch, edition=edition, format=fmt,
+                                  file_name=path.name, sha256=release.digest(path), size=path.stat().st_size)
+                    records.append((record, path))
+                    # The old stable contains native x64 packages, but not native Win32.
+                    if (arch, edition) not in missing and (fmt == 'inno-exe' or arch == 'x86_64'):
+                        assets.append(dict(id=len(assets)+1, name=path.name, size=path.stat().st_size,
+                                           digest='sha256:' + record['sha256']))
+        stable = dict(target_commitish='c' * 40, draft=False, prerelease=False, assets=assets)
+        mutations = []
+        def gh(*args, **kwargs):
+            if args[:2] == ('api', 'repos/owner/repo/contents/Cargo.toml?ref=v1.5.1'):
+                content = base64.b64encode(b'[package]\nversion="1.5.1"\n').decode()
+                return subprocess.CompletedProcess([], 0, json.dumps(dict(content=content)), '')
+            if args[:2] == ('release', 'upload'):
+                path = Path(args[3])
+                stable['assets'].append(dict(id=100+len(stable['assets']), name=path.name,
+                    size=path.stat().st_size, digest='sha256:'+release.digest(path)))
+            elif args[:3] == ('api', '--method', 'DELETE'):
+                asset_id = int(args[3].split('/')[-1])
+                stable['assets'] = [a for a in stable['assets'] if a['id'] != asset_id]
+            elif args[:2] == ('release', 'download'):
+                directory = Path(args[args.index('--dir')+1])
+                (directory / args[args.index('--pattern')+1]).write_bytes(b'wrong bytes')
+                return subprocess.CompletedProcess([], 0, '', '')
+            else:
+                raise AssertionError(f'Unexpected mutation: {args}')
+            mutations.append(args)
+            return subprocess.CompletedProcess([], 0, '', '')
+        return records, stable, mutations, gh
+
+    def test_existing_version_still_uploads_missing_win32_setups_for_both_editions(self):
+        for missing in ({('x86', 'cliente'), ('x86', 'suporte')}, {('x86', 'suporte')}):
+            with self.subTest(missing=missing):
+                records, stable, mutations, gh = self.existing_stable_fixture(missing)
+                with patch.object(release, 'release', side_effect=lambda *a: copy.deepcopy(stable)), \
+                     patch.object(release, 'gh', side_effect=gh):
+                    release.reconcile_stable('owner/repo', '1.5.1', records)
+                uploads = [Path(call[3]).name for call in mutations if call[:2] == ('release', 'upload')]
+                self.assertEqual(set(uploads), {f'bgdesk-{e}-1.5.1-windows-{a}-setup.exe' for a,e in missing})
+                self.assertEqual(len(stable['assets']), 4)
+                self.assertTrue(all(a['name'].endswith('-setup.exe') for a in stable['assets']))
+                self.assertEqual(stable['target_commitish'], 'c' * 40)
+
+    def test_existing_stable_different_bytes_are_rejected_before_any_upload_or_deletion(self):
+        records, stable, mutations, gh = self.existing_stable_fixture({('x86', 'suporte')})
+        stable['assets'][0]['digest'] = 'sha256:' + '0' * 64
+        with patch.object(release, 'release', return_value=stable), patch.object(release, 'gh', side_effect=gh):
+            with self.assertRaisesRegex(ValueError, 'different bytes'):
+                release.reconcile_stable('owner/repo', '1.5.1', records)
+        self.assertEqual(mutations, [])

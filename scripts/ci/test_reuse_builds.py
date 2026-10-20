@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location('reuse', Path(__file__).with_name('reuse-builds.py'))
@@ -35,7 +36,7 @@ class ReuseBuildTests(unittest.TestCase):
 
     def plan(self):
         return reuse.make_plan(dict(include=[dict(platform='windows', arch='x86_64', win32=True)]),
-                               '1.5.1', REPO, self.query)['include'][0]
+                               '1.5.1', REPO, self.query, lambda *args: True)['include'][0]
 
     def test_same_version_reuses_both_architectures_even_from_another_commit_and_failed_run(self):
         target = self.plan()
@@ -78,12 +79,12 @@ class ReuseBuildTests(unittest.TestCase):
         self.jobs[0]['name'] = 'windows / x86_64 (cliente + suporte)'
         self.assertEqual(self.plan()['win32_reuse_run'], '')
 
-    def directory(self, root):
+    def directory(self, root, edition='cliente'):
         records = []
         for fmt in ('exe', 'inno-exe'):
             path = root / f'{fmt}.exe'
-            path.write_bytes(fmt.encode())
-            records.append(dict(platform='windows', arch='x86', edition='cliente',
+            path.write_bytes(b'MZ\0Inno Setup Setup Data' if fmt == 'inno-exe' else fmt.encode())
+            records.append(dict(platform='windows', arch='x86', edition=edition,
                                 version='1.5.1', format=fmt, file_name=path.name,
                                 size=path.stat().st_size, sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
         (root / 'artifacts.json').write_text(json.dumps(records))
@@ -106,4 +107,29 @@ class ReuseBuildTests(unittest.TestCase):
                 reuse.validate_directory(root, '1.5.2', 'windows', 'x86', 'cliente')
             (root / 'artifacts.json').write_text(json.dumps(records[:1]))
             with self.assertRaisesRegex(ValueError, 'incomplete'):
+                reuse.validate_directory(root, '1.5.1', 'windows', 'x86', 'cliente')
+
+    def test_candidate_requires_actual_setup_for_both_editions_before_skipping_build(self):
+        def download(repository, run, platform, arch, edition, directory):
+            directory.mkdir()
+            self.directory(directory, edition)
+            if edition == 'suporte':
+                (directory / 'inno-exe.exe').unlink()
+        with patch.object(reuse, 'download_edition', side_effect=download):
+            self.assertFalse(reuse.validate_candidate(REPO, '123', '1.5.1', 'windows', 'x86'))
+        matrix = dict(include=[dict(platform='windows', arch='x86')])
+        with patch.object(reuse, 'download_edition', side_effect=download):
+            target = reuse.make_plan(matrix, '1.5.1', REPO, self.query)['include'][0]
+        self.assertTrue(target['needs_build'])
+        self.assertEqual(target['reuse_run'], '')
+
+    def test_bare_app_mislabeled_as_setup_is_rejected_even_with_correct_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = self.directory(root)
+            app = root / 'inno-exe.exe'
+            app.write_bytes(b'MZ bare application')
+            records[1].update(size=app.stat().st_size, sha256=hashlib.sha256(app.read_bytes()).hexdigest())
+            (root / 'artifacts.json').write_text(json.dumps(records))
+            with self.assertRaisesRegex(ValueError, 'not an Inno Setup'):
                 reuse.validate_directory(root, '1.5.1', 'windows', 'x86', 'cliente')
