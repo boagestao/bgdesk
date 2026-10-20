@@ -20,10 +20,16 @@ done
 
 fail() { echo "[macOS] ERRO: $*" >&2; exit 1; }
 [[ "$(uname -s)" == "Darwin" ]] || fail "Execute no macOS."
+stage="${BGDESK_PACKAGE_STAGE:-full}"
+case "$stage" in
+  full|package|notarize|staple) expected_args=2 ;;
+  validate) expected_args=1 ;;
+  *) fail "Etapa desconhecida: $stage" ;;
+esac
 if [[ "$check_only" == "1" ]]; then
   [[ $# == 0 ]] || fail "--check não aceita caminhos."
-else
-  [[ $# == 2 ]] || fail "Uso: $0 [--local] app.app output.dmg"
+elif [[ $# != "$expected_args" ]]; then
+  fail "Uso: $0 [--local] app.app output.dmg"
 fi
 
 tmp_keychain=""
@@ -134,6 +140,61 @@ prepare_external_p12() {
   echo "[macOS] Certificado lido no lugar, sem cópia: $p12_real"
 }
 
+checkpoint() {
+  [[ -n "${BGDESK_CHECKPOINT_DIR:-}" ]] || return 0
+  python3 "$ROOT/scripts/ci/macos_checkpoint.py" --dir "$BGDESK_CHECKPOINT_DIR" "$@"
+}
+
+save_compiled_app() {
+  [[ -n "${BGDESK_CHECKPOINT_DIR:-}" ]] || return 0
+  mkdir -p "$BGDESK_CHECKPOINT_DIR"
+  checkpoint ensure --version "${BGDESK_VERSION:-}" --edition "${BGDESK_EDITION:-}" \
+    --arch "${BGDESK_ARCH:-}" --origin "${BGDESK_CHECKPOINT_ORIGIN:-local}"
+  COPYFILE_DISABLE=1 tar -cf "$BGDESK_CHECKPOINT_DIR/app.tar" \
+    -C "$(dirname "$app_path")" "$(basename "$app_path")"
+  checkpoint add-file --name app.tar --stage compiled
+}
+
+save_signed_dmg() {
+  [[ -n "${BGDESK_CHECKPOINT_DIR:-}" ]] || return 0
+  cp -p "$work_dir/final.dmg" "$BGDESK_CHECKPOINT_DIR/signed.dmg"
+  checkpoint add-file --name signed.dmg --stage signed
+}
+
+save_delivered_dmg() {
+  [[ -n "${BGDESK_CHECKPOINT_DIR:-}" ]] || return 0
+  cp -p "$work_dir/final.dmg" "$BGDESK_CHECKPOINT_DIR/delivered.dmg"
+  checkpoint add-file --name delivered.dmg --stage validated
+}
+
+validate_distribution_image() {
+  local image="$1" mount app
+  [[ -f "$image" ]] || fail "DMG não encontrado: $image"
+  hdiutil verify "$image"
+  codesign --verify --strict --verbose=2 "$image"
+  xcrun stapler validate "$image"
+  spctl --assess --type open --context context:primary-signature --verbose=4 "$image"
+  mount="$(mktemp -d "${TMPDIR:-/tmp}/bgdesk-validate.XXXXXX")"
+  mount_point="$mount"
+  mounted=1
+  hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$image"
+  app="$(find "$mount" -maxdepth 1 -name '*.app' -print -quit)"
+  [[ -n "$app" && -d "$app" ]] || fail "App ausente no DMG."
+  codesign --verify --deep --strict --verbose=2 "$app"
+  [[ -L "$mount/Applications" && "$(readlink "$mount/Applications")" == /Applications ]] || \
+    fail "Atalho para Aplicativos ausente no DMG."
+  spctl --assess --type execute --verbose=4 "$app"
+  hdiutil detach "$mount" -quiet
+  mounted=0
+  rm -rf "$mount"
+  echo "[macOS] DMG validado: $image"
+}
+
+if [[ "$stage" == "validate" ]]; then
+  validate_distribution_image "$1"
+  exit 0
+fi
+
 load_dotenv
 
 team_id="${MACOS_TEAM_ID:-3Z7C3Q7NMT}"
@@ -187,7 +248,7 @@ else
   fi
   notary_label="perfil '$profile'"
 fi
-if [[ "$local_build" == "0" ]]; then
+if [[ "$local_build" == "0" && "$stage" != "package" ]]; then
   xcrun --find notarytool >/dev/null
   xcrun --find stapler >/dev/null
   if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
@@ -218,7 +279,11 @@ if [[ "$check_only" == "1" ]]; then
 fi
 
 app_path=$1
-[[ -d "$app_path/Contents/MacOS" ]] || fail "App não encontrado: $app_path"
+if [[ "$stage" == "full" || "$stage" == "package" ]]; then
+  [[ -d "$app_path/Contents/MacOS" ]] || fail "App não encontrado: $app_path"
+else
+  [[ -f "$app_path" ]] || fail "DMG assinado não encontrado: $app_path"
+fi
 app_path="$(cd "$(dirname "$app_path")" && pwd)/$(basename "$app_path")"
 dmg_path=$2
 [[ "$dmg_path" == *.dmg ]] || fail "A saída deve terminar em .dmg."
@@ -301,42 +366,81 @@ staple_ticket() {
   BGDESK_STAPLED_WITH_RCODESIGN=1
 }
 
-bash "$ROOT/.github/scripts/sign-macos-app.sh" "$app_path" "$identity" \
-  "$ROOT/flutter/macos/Runner/Release.entitlements"
-verify_signature "$app_path"
+if [[ "$stage" == "full" || "$stage" == "package" ]]; then
+  save_compiled_app
+  bash "$ROOT/.github/scripts/sign-macos-app.sh" "$app_path" "$identity" \
+    "$ROOT/flutter/macos/Runner/Release.entitlements"
+  verify_signature "$app_path"
 
-staging="$work_dir/staging"
-mkdir -p "$staging"
-ditto "$app_path" "$staging/$(basename "$app_path")"
-ln -s /Applications "$staging/Applications"
-# A compressed, read-only UDIF image preserves the signed framework symlinks.
-hdiutil create -volname BGDesk -fs HFS+ -format UDZO -srcfolder "$staging" \
-  "$work_dir/final.dmg"
-bundle_id=$(plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist")
-dmg_sign_args=(--force --sign "$identity" --identifier "$bundle_id.diskimage")
-if [[ -n "${MACOS_CODESIGN_KEYCHAIN:-}" ]]; then
-  dmg_sign_args+=(--keychain "$MACOS_CODESIGN_KEYCHAIN")
+  staging="$work_dir/staging"
+  mkdir -p "$staging"
+  ditto "$app_path" "$staging/$(basename "$app_path")"
+  ln -s /Applications "$staging/Applications"
+  # A compressed, read-only UDIF image preserves the signed framework symlinks.
+  hdiutil create -volname BGDesk -fs HFS+ -format UDZO -srcfolder "$staging" \
+    "$work_dir/final.dmg"
+else
+  [[ -f "$app_path" ]] || fail "DMG assinado não encontrado: $app_path"
+  cp -p "$app_path" "$work_dir/final.dmg"
+  verify_signature "$work_dir/final.dmg"
 fi
-if [[ "$identity" != "-" ]]; then
-  dmg_sign_args+=(--timestamp)
+if [[ "$stage" == "full" || "$stage" == "package" ]]; then
+  bundle_id=$(plutil -extract CFBundleIdentifier raw "$app_path/Contents/Info.plist")
+  dmg_sign_args=(--force --sign "$identity" --identifier "$bundle_id.diskimage")
+  if [[ -n "${MACOS_CODESIGN_KEYCHAIN:-}" ]]; then
+    dmg_sign_args+=(--keychain "$MACOS_CODESIGN_KEYCHAIN")
+  fi
+  if [[ "$identity" != "-" ]]; then
+    dmg_sign_args+=(--timestamp)
+  fi
+  codesign "${dmg_sign_args[@]}" "$work_dir/final.dmg"
+  verify_signature "$work_dir/final.dmg"
+  save_signed_dmg
 fi
-codesign "${dmg_sign_args[@]}" "$work_dir/final.dmg"
-verify_signature "$work_dir/final.dmg"
+if [[ "$stage" == "package" ]]; then
+  cp -p "$work_dir/final.dmg" "$dmg_path"
+  echo "[macOS] DMG assinado, sem notarização: $dmg_path"
+  exit 0
+fi
 
 if [[ "$local_build" == "0" ]]; then
   # Notarize the outermost container, including the signed app within it.
   result_path="${dmg_path%.dmg}.notary-result.json"
-  if ! xcrun notarytool submit "$work_dir/final.dmg" "${notary_args[@]}" \
-      --wait --timeout 30m --output-format json >"$result_path"; then
-    echo "[macOS] Consulte o resultado em $result_path" >&2
-    exit 1
+  notary_action="submit"
+  if [[ "$stage" != "full" && -n "${BGDESK_CHECKPOINT_DIR:-}" ]]; then
+    notary_action="$(python3 "$ROOT/scripts/ci/macos_checkpoint.py" --dir "$BGDESK_CHECKPOINT_DIR" action)"
+  fi
+  if [[ "$notary_action" == "submit" && "$stage" == "staple" ]]; then
+    fail "A notarização deste checkpoint ainda não foi aceita. Não vou reenviar o DMG."
+  fi
+  if [[ "$notary_action" == "submit" ]]; then
+    if ! xcrun notarytool submit "$work_dir/final.dmg" "${notary_args[@]}" \
+        --wait --timeout 30m --output-format json >"$result_path"; then
+      echo "[macOS] Consulte o resultado em $result_path" >&2
+      exit 1
+    fi
+  else
+    submission_id="$(python3 "$ROOT/scripts/ci/macos_checkpoint.py" --dir "$BGDESK_CHECKPOINT_DIR" field --key notarization.id)"
+    if [[ "$notary_action" == "wait" ]]; then
+      xcrun notarytool wait "$submission_id" "${notary_args[@]}" --timeout 30m
+    fi
+    xcrun notarytool info "$submission_id" "${notary_args[@]}" --output-format json >"$result_path"
   fi
   status=$(plutil -extract status raw "$result_path")
   submission_id=$(plutil -extract id raw "$result_path")
+  if [[ -n "${BGDESK_CHECKPOINT_DIR:-}" ]]; then
+    cp -p "$result_path" "$BGDESK_CHECKPOINT_DIR/notary-result.json"
+    checkpoint notarization --id "$submission_id" --status "$status" --stage notarized
+  fi
   if [[ "$status" != "Accepted" ]]; then
     log_path="${dmg_path%.dmg}.notary-log.json"
     xcrun notarytool log "$submission_id" "${notary_args[@]}" "$log_path" || true
     fail "Notarização $status ($submission_id). Consulte $result_path e $log_path."
+  fi
+  if [[ "$stage" == "notarize" ]]; then
+    cp -p "$work_dir/final.dmg" "$dmg_path"
+    echo "[macOS] Notarização aceita ($submission_id). O ticket ainda não foi anexado: $dmg_path"
+    exit 0
   fi
   staple_ticket "$work_dir/final.dmg"
   if ! stapler_with_retry validate "$work_dir/final.dmg"; then
@@ -355,7 +459,11 @@ hdiutil verify "$work_dir/final.dmg"
 mkdir -p "$mount_point"
 mounted=1
 hdiutil attach -readonly -nobrowse -mountpoint "$mount_point" "$work_dir/final.dmg"
-delivered_app="$mount_point/$(basename "$app_path")"
+if [[ "$stage" == "full" ]]; then
+  delivered_app="$mount_point/$(basename "$app_path")"
+else
+  delivered_app="$(find "$mount_point" -maxdepth 1 -name '*.app' -print -quit)"
+fi
 verify_signature "$delivered_app"
 [[ -L "$mount_point/Applications" && "$(readlink "$mount_point/Applications")" == /Applications ]] || \
   fail "Atalho para Aplicativos ausente no DMG."
@@ -366,5 +474,6 @@ else
 fi
 hdiutil detach "$mount_point" -quiet
 mounted=0
+save_delivered_dmg
 mv -f "$work_dir/final.dmg" "$dmg_path"
 echo "[macOS] DMG validado: $dmg_path"

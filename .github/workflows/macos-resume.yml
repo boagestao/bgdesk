@@ -1,0 +1,88 @@
+name: BGDesk - Resume macOS packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Run ID that published the checkpoint artifact
+        required: true
+        type: string
+      edition:
+        description: Edition
+        required: true
+        type: choice
+        options: [cliente, suporte]
+      arch:
+        description: Architecture
+        required: true
+        type: choice
+        options: [aarch64, x86_64]
+      stage:
+        description: Stage to run without recompiling
+        required: true
+        type: choice
+        options: [package, notarize, staple, validate]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resume:
+    name: ${{ inputs.stage }} / ${{ inputs.edition }} / ${{ inputs.arch }}
+    runs-on: ${{ inputs.arch == 'aarch64' && 'macos-15' || 'macos-15-intel' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download checkpoint
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: checkpoint-macos-${{ inputs.arch }}-${{ inputs.edition }}
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+          path: checkpoint
+      - name: Prepare temporary macOS certificate
+        if: inputs.stage != 'validate'
+        env:
+          MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
+          MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+          MACOS_P12_FILE: ${{ runner.temp }}/bgdesk-distribution.p12
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          target = Path(os.environ['MACOS_P12_FILE'])
+          target.touch(mode=0o600)
+          target.write_bytes(base64.b64decode(os.environ['MACOS_P12_BASE64'], validate=True))
+          PY
+          echo "MACOS_P12_FILE=$MACOS_P12_FILE" >> "$GITHUB_ENV"
+      - name: Run the selected packaging stage
+        env:
+          STAGE: ${{ inputs.stage }}
+          EDITION: ${{ inputs.edition }}
+          ARCH: ${{ inputs.arch }}
+          MACOS_P12_PASSWORD: ${{ inputs.stage != 'validate' && secrets.MACOS_P12_PASSWORD || '' }}
+          MACOS_CODESIGN_IDENTITY: ${{ inputs.stage != 'validate' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
+          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID || '3Z7C3Q7NMT' }}
+          MACOS_NOTARY_APPLE_ID: ${{ (inputs.stage == 'notarize' || inputs.stage == 'staple') && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          MACOS_NOTARY_PASSWORD: ${{ (inputs.stage == 'notarize' || inputs.stage == 'staple') && secrets.MACOS_NOTARY_PASSWORD || '' }}
+        run: |
+          mkdir -p result
+          if [[ "$STAGE" == "validate" ]]; then
+            bash scripts/ci/macos-resume.sh validate checkpoint >result/validation.txt 2>&1
+          else
+            bash scripts/ci/macos-resume.sh "$STAGE" checkpoint "result/bgdesk-${EDITION}-${ARCH}.dmg" >result/log.txt 2>&1
+          fi
+      - name: Remove temporary macOS certificate
+        if: always() && inputs.stage != 'validate'
+        run: rm -f "$RUNNER_TEMP/bgdesk-distribution.p12"
+      - name: Publish stage result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-resume-${{ inputs.arch }}-${{ inputs.edition }}-${{ inputs.stage }}
+          path: result
+          if-no-files-found: ignore
+          retention-days: 14

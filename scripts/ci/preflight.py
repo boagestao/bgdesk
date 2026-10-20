@@ -18,10 +18,6 @@ TARGETS = [
     ("linux", "aarch64", "ubuntu-24.04-arm"),
 ]
 
-# Hold Linux, Windows, and macOS Intel until Apple Silicon signs and notarizes.
-ENABLED_TARGETS = {("macos", "aarch64")}
-
-
 def distribution_matrix(platforms):
     return {"include": [
         dict(platform=platform, arch=arch, runner=runner)
@@ -31,10 +27,7 @@ def distribution_matrix(platforms):
 
 
 def matrix(platforms):
-    return {"include": [
-        target for target in distribution_matrix(platforms)["include"]
-        if (target["platform"], target["arch"]) in ENABLED_TARGETS
-    ]}
+    return distribution_matrix(platforms)
 
 
 def main():
@@ -46,14 +39,7 @@ def main():
         raise SystemExit("Publication is allowed only from main; use publish=false to validate another branch")
     active = matrix(platforms)["include"]
     if not active:
-        raise SystemExit(
-            "Only macos/aarch64 is enabled until that build succeeds; "
-            f"no jobs match platforms={platforms}"
-        )
-    full = {(platform, arch) for platform, arch, _runner in TARGETS}
-    if publish and {(item["platform"], item["arch"]) for item in active} != full:
-        print("Publication skipped until macos/aarch64 succeeds and the other runners are enabled again.")
-        publish = False
+        raise SystemExit(f"No build jobs match platforms={platforms}")
     origin = os.environ.get("BGDESK_UPDATE_ORIGIN", "https://bgdesk.com")
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+", origin):
         raise SystemExit("Update origin must be HTTPS, with no path or trailing slash")

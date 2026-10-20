@@ -54,7 +54,6 @@ jobs:
       - name: Validate credentials and build plan
         id: plan
         env:
-          # preflight keeps only macos/aarch64 until that job succeeds; publication stays off.
           BUILD_PLATFORMS: ${{ inputs.platforms || 'all' }}
           PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
           BGDESK_CONFIG_SSH_KEY: ${{ secrets.BGDESK_CONFIG_SSH_KEY }}
@@ -144,6 +143,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       BGDESK_REQUIRE_BRIDGE: '1'
+      BGDESK_VERSION: ${{ needs.preflight.outputs.version }}
+      BGDESK_CHECKPOINT_ORIGIN: ${{ github.sha }}
     timeout-minutes: 360
     strategy:
       fail-fast: false

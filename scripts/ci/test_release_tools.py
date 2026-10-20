@@ -179,33 +179,10 @@ class ReleaseToolsTests(unittest.TestCase):
                 plan.main()
         values = dict(line.split('=',1) for line in output.read_text().splitlines())
         self.assertEqual(values['publish'], 'false')
-        self.assertEqual(json.loads(values['matrix'])['include'],
-                         [{'platform': 'macos', 'arch': 'aarch64', 'runner': 'macos-15'}])
+        selected = json.loads(values['matrix'])['include']
+        self.assertEqual({(item['platform'], item['arch']) for item in selected},
+                         {('macos', 'aarch64'), ('macos', 'x86_64')})
         self.assertNotIn('test-config-token', output.read_text())
-
-    def test_disabled_platforms_are_refused_until_apple_silicon_passes(self):
-        output = self.root / 'outputs'
-        for platforms in ('windows', 'linux'):
-            with self.subTest(platforms=platforms):
-                with patch.dict(os.environ, {'BUILD_PLATFORMS':platforms, 'PUBLISH_RELEASE':'false',
-                                            'BGDESK_CONFIG_TOKEN':'test-config-token',
-                                            'GITHUB_OUTPUT':str(output)}, clear=True):
-                    with self.assertRaises(SystemExit):
-                        plan.main()
-
-    def test_partial_matrix_skips_publication(self):
-        output = self.root / 'outputs'
-        with patch.dict(os.environ, {'BUILD_PLATFORMS':'all', 'PUBLISH_RELEASE':'true',
-                                    'GITHUB_REF':'refs/heads/main',
-                                    'BGDESK_CONFIG_TOKEN':'test-config-token',
-                                    'MACOS_P12_BASE64':'cert', 'MACOS_P12_PASSWORD':'pw',
-                                    'MACOS_NOTARY_APPLE_ID':'apple', 'MACOS_NOTARY_PASSWORD':'app-pw',
-                                    'GITHUB_OUTPUT':str(output)}, clear=True):
-            with patch('sys.stdout', new_callable=io.StringIO):
-                plan.main()
-        values = dict(line.split('=',1) for line in output.read_text().splitlines())
-        self.assertEqual(values['publish'], 'false')
-        self.assertEqual(len(json.loads(values['matrix'])['include']), 1)
 
     def test_build_plan_allocates_one_runner_for_each_platform_and_architecture(self):
         targets = plan.distribution_matrix('all')['include']
@@ -220,11 +197,7 @@ class ReleaseToolsTests(unittest.TestCase):
                 selected = plan.distribution_matrix(platform)['include']
                 self.assertEqual(len(selected), count)
                 self.assertTrue(all(target['platform'] == platform for target in selected))
-        active = plan.matrix('all')['include']
-        self.assertEqual([(target['platform'], target['arch']) for target in active], [('macos', 'aarch64')])
-        self.assertEqual(plan.matrix('macos')['include'], active)
-        self.assertEqual(plan.matrix('windows')['include'], [])
-        self.assertEqual(plan.matrix('linux')['include'], [])
+        self.assertEqual(plan.matrix('all')['include'], targets)
 
     def test_serial_editions_keep_independent_artifacts_for_publication(self):
         repository = Path(__file__).resolve().parents[2]

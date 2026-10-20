@@ -5,6 +5,7 @@ Run: python3 scripts/test_macos_packaging.py
 Notarization orchestration uses fake Apple responses; signature/DMG roundtrips
 use real codesign, hdiutil and ditto. No notarization upload is required.
 """
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -219,6 +220,8 @@ case "$1 $2" in
   'notarytool submit')
     printf '{"id":"test-submission","status":"%s"}\n' "$TEST_NOTARY_STATUS" ;;
   'notarytool log') echo '{"issues": []}' >"${@: -1}" ;;
+  'notarytool info'|'notarytool wait')
+    printf '{"id":"%s","status":"%s"}\n' "${TEST_NOTARY_ID:-test-submission}" "$TEST_NOTARY_STATUS" ;;
   'stapler staple'|'stapler validate')
     attempt_file="$TEST_EVENTS.$2.attempts"
     attempts=0
@@ -350,6 +353,83 @@ fi
         self.assertIn('stapler validate', events)
         ticket = self.run_command(['xattr', '-p', 'com.bgdesk.test-notary-ticket', archive])
         self.assertEqual(ticket.stdout.strip(), 'accepted')
+
+    def test_checkpoint_keeps_the_signed_image_when_a_later_phase_fails(self):
+        env, app, archive = self.mock_distribution_services()
+        env["TEST_NOTARY_STATUS"] = "Invalid"
+        checkpoint = self.base / "checkpoint"
+        env.update(BGDESK_CHECKPOINT_DIR=str(checkpoint), BGDESK_VERSION="1.5.2",
+                   BGDESK_EDITION="cliente", BGDESK_ARCH="aarch64",
+                   BGDESK_CHECKPOINT_ORIGIN="test-origin")
+        self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
+        self.assertEqual(archive.read_bytes(), b"previous release")
+        self.assertTrue((checkpoint / "signed.dmg").stat().st_size > 0)
+        listing = self.run_command(["tar", "-tf", checkpoint / "app.tar"]).stdout
+        self.assertIn("BGDesk.app/", listing)
+        saved = json.loads((checkpoint / "checkpoint.json").read_text())
+        self.assertEqual(saved["notarization"]["status"], "Invalid")
+        self.assertEqual(saved["version"], "1.5.2")
+        self.assertEqual(saved["edition"], "cliente")
+        self.assertEqual(saved["arch"], "aarch64")
+        self.assertEqual(saved["origin"], "test-origin")
+        self.assertFalse(any(path.name.startswith(".macos-package.") for path in archive.parent.iterdir()))
+
+    def test_accepted_checkpoint_is_stapled_without_resubmitting(self):
+        env, app, archive = self.mock_distribution_services()
+        env["TEST_STAPLE_FAILURES"] = "99"
+        checkpoint = self.base / "checkpoint"
+        env["BGDESK_CHECKPOINT_DIR"] = str(checkpoint)
+        self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
+        saved = json.loads((checkpoint / "checkpoint.json").read_text())
+        self.assertEqual(saved["notarization"]["status"], "Accepted")
+        self.assertTrue((checkpoint / "signed.dmg").is_file())
+        (self.base / "events").write_text("")
+        env["TEST_STAPLE_FAILURES"] = "0"
+        env["BGDESK_PACKAGE_STAGE"] = "notarize"
+        notarized = self.base / "notarized.dmg"
+        self.run_command(["bash", PACKAGE, checkpoint / "signed.dmg", notarized], env=env)
+        events = (self.base / "events").read_text().splitlines()
+        self.assertEqual(events.count("notarytool submit"), 0)
+        self.assertEqual(events.count("stapler staple"), 0)
+        self.assertIn("notarytool info", events)
+        (self.base / "events").write_text("")
+        env["BGDESK_PACKAGE_STAGE"] = "staple"
+        delivered = self.base / "resumed.dmg"
+        self.run_command(["bash", PACKAGE, checkpoint / "signed.dmg", delivered], env=env)
+        events = (self.base / "events").read_text().splitlines()
+        self.assertEqual(events.count("notarytool submit"), 0)
+        self.assertIn("notarytool info", events)
+        self.assertGreaterEqual(events.count("stapler staple"), 1)
+        ticket = self.run_command(["xattr", "-p", "com.bgdesk.test-notary-ticket", delivered])
+        self.assertEqual(ticket.stdout.strip(), "accepted")
+
+    def test_checkpoint_app_archive_preserves_symlinks(self):
+        app = self.make_app()
+        archive = self.base / "bgdesk-local.dmg"
+        checkpoint = self.base / "checkpoint"
+        env = dict(self.env, BGDESK_CHECKPOINT_DIR=str(checkpoint))
+        self.run_command(["bash", PACKAGE, "--local", app, archive], env=env)
+        extracted = self.base / "extracted"
+        extracted.mkdir()
+        self.run_command(["tar", "-xf", checkpoint / "app.tar", "-C", extracted])
+        link = extracted / "BGDesk.app/Contents/Frameworks/Test.framework/Versions/Current"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), "A")
+
+    def test_package_stage_signs_without_notarizing(self):
+        env, app, _archive = self.mock_distribution_services()
+        checkpoint = self.base / "checkpoint"
+        env.update(BGDESK_CHECKPOINT_DIR=str(checkpoint), BGDESK_PACKAGE_STAGE="package")
+        output = self.base / "signed-only.dmg"
+        self.run_command(["bash", PACKAGE, app, output], env=env)
+        events = (self.base / "events").read_text().splitlines() if (self.base / "events").is_file() else []
+        self.assertEqual(events.count("notarytool submit"), 0)
+        self.assertEqual(events.count("stapler staple"), 0)
+        self.assertGreater((checkpoint / "signed.dmg").stat().st_size, 0)
+        self.assertEqual(output.read_bytes(), (checkpoint / "signed.dmg").read_bytes())
+        saved = json.loads((checkpoint / "checkpoint.json").read_text())
+        self.assertEqual(saved["stage"], "signed")
+        self.assertNotIn("notarization", saved)
 
     def test_installers_reject_invalid_image_before_installing(self):
         env = self.fake_tool("curl", '''

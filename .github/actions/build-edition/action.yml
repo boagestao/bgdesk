@@ -26,6 +26,10 @@ runs:
     - name: Build signed and notarized DMG
       if: inputs.platform == 'macos'
       shell: bash
+      env:
+        BGDESK_CHECKPOINT_DIR: ${{ github.workspace }}/checkpoints/${{ inputs.edition }}
+        BGDESK_EDITION: ${{ inputs.edition }}
+        BGDESK_ARCH: ${{ inputs.arch }}
       run: |
         args=(mac)
         [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente mac)
@@ -90,4 +94,12 @@ runs:
         name: build-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.edition }}
         path: release-artifacts/${{ inputs.edition }}/*
         if-no-files-found: error
+        retention-days: 14
+    - name: Publish macOS packaging checkpoint
+      if: always() && inputs.platform == 'macos'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: checkpoint-macos-${{ inputs.arch }}-${{ inputs.edition }}
+        path: checkpoints/${{ inputs.edition }}
+        if-no-files-found: ignore
         retention-days: 14

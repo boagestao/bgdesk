@@ -102,6 +102,10 @@ Não é gerado ZIP.
 
 O resultado da notarização fica ao lado do DMG, em `*.notary-result.json`.
 Em caso de rejeição, o script também tenta salvar `*.notary-log.json`.
+No GitHub Actions, os mesmos dados ficam no checkpoint da edição, publicado
+mesmo se o stapler ou o Gatekeeper falharem depois. Uma execução manual pode
+retomar só a etapa que falta, e uma notarização `Accepted` é reutilizada em
+vez de enviar o DMG outra vez.
 Se o tempo de espera de 30 minutos expirar, a Apple pode continuar processando;
 use o ID registrado no resultado com `xcrun notarytool info` ou `wait` antes de
 enviar novamente.

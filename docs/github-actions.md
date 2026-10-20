@@ -5,10 +5,9 @@ publish**. Cada push na `main` compila cliente e suporte. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
-Enquanto o job macOS Apple Silicon não terminar com sucesso, Linux, Windows e
-macOS Intel ficam fora da matriz. Nesse estado o push na `main` só dispara
-`macos / aarch64` e não publica, para um conjunto incompleto não substituir o
-`latest.json`. A publicação continua exigindo os vinte arquivos das duas edições.
+O build Apple Silicon já passou. A matriz volta a ter as cinco máquinas, e a
+publicação continua exigindo os vinte arquivos das duas edições. Um conjunto
+incompleto não substitui o `latest.json`.
 
 O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
 O resultado fica em cache, pela hash de `src/flutter_ffi.rs`, do pubspec e do
@@ -16,9 +15,8 @@ gerador, e também como artefato `flutter-bridge`. Cada plataforma baixa esse
 artefato e recusa recompilar se ele não estiver presente. Os arquivos gerados
 são os mesmos para macOS, Windows e Linux.
 
-São cinco jobs paralelos, em máquinas nativas do GitHub, quando a matriz completa
-está ligada. Cada job prepara o ambiente uma vez e compila primeiro o cliente,
-depois o suporte, na mesma máquina:
+São cinco jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
+ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máquina:
 
 - macOS Apple Silicon e Intel: DMGs assinados, notarizados e verificados pelo
   mesmo `build.sh` / `package-macos.sh` usado no Mac local.
@@ -38,6 +36,18 @@ compiladas do Cargo; no Linux também usam a mesma imagem e os mesmos volumes
 Docker. Os artefatos de cada edição são guardados separadamente antes de iniciar
 a próxima, sem apagar o cache de compilação entre elas. A publicação continua
 exigindo os vinte arquivos das duas edições em todas as plataformas.
+
+No macOS, cada edição guarda um checkpoint fora do diretório temporário do DMG:
+`app.tar` do app compilado (links simbólicos e permissões preservados), o DMG
+assinado antes da notarização, o resultado com ID e status, e os hashes junto
+de versão, edição, arquitetura e commit de origem. Esse diretório é publicado
+como `checkpoint-macos-<arch>-<edição>` assim que a edição termina, inclusive
+quando uma fase posterior falha. O workflow manual **BGDesk - Resume macOS
+packaging** baixa esse artefato de um run anterior e executa só uma etapa:
+empacotar e assinar, notarizar ou retomar a submissão, anexar o ticket, ou
+validar assinatura, ticket, Gatekeeper e o app dentro do DMG. Notarização já
+aceita não é reenviada. A validação não instala Rust, Flutter nem vcpkg e não
+recompila; o log fica no artefato da execução.
 
 ## Salvar as credenciais
 
