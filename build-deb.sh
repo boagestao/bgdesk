@@ -55,6 +55,8 @@ Recommends: libayatana-appindicator3-1
 Description: A remote control software.
 EOL
 
+python3 scripts/stage-linux-drm.py tmpdeb/usr/share/bgdesk --prepare --root tmpdeb --control tmpdeb/DEBIAN/control
+
 ./md5.py
 
 

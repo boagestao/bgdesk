@@ -2,12 +2,12 @@ pkgname=bgdesk
 pkgver=1.5.1
 pkgrel=0
 epoch=
-pkgdesc="BGDesk remote desktop client"
+pkgdesc="BGDesk remote desktop with unattended Wayland and X11 access"
 arch=('x86_64')
 url="https://boagestao.com.br"
 license=('AGPL-3.0')
 groups=()
-depends=('gtk3' 'xdotool' 'libxcb' 'libxfixes' 'alsa-lib' 'libva' 'libappindicator-gtk3' 'gst-plugins-base' 'gst-plugin-pipewire')
+depends=('gtk3' 'xdotool' 'libxcb' 'libxfixes' 'alsa-lib' 'libva' 'libappindicator-gtk3' 'gst-plugins-base' 'gst-plugin-pipewire' 'libdrm>=2.4.101' 'libglvnd')
 makedepends=()
 checkdepends=()
 optdepends=()
@@ -22,9 +22,19 @@ noextract=()
 md5sums=() #generate with 'makepkg -g'
 
 package() {
-  if [[ ${FLUTTER} ]]; then
+  if [[ ${FLUTTER:-} ]]; then
 	  mkdir -p "${pkgdir}/usr/share/bgdesk" && cp -r ${HBB}/flutter/build/linux/x64/release/bundle/* -t "${pkgdir}/usr/share/bgdesk"
+  else
+    install -Dm755 "$HBB/target/release/bgdesk" "${pkgdir}/usr/share/bgdesk/bgdesk"
+    install -Dm755 "$HBB/libsciter-gtk.so" "${pkgdir}/usr/share/bgdesk/libsciter-gtk.so"
   fi
+  local payload="$HBB/target/release"
+  if [[ ${FLUTTER:-} ]]; then payload="$HBB/flutter/build/linux/x64/release/bundle"; fi
+  local libraries=("$payload"/libdrmtap.so.0.*)
+  [[ ${#libraries[@]} == 1 && -f "${libraries[0]}" && ! -L "${libraries[0]}" ]] || return 1
+  install -Dm755 "${libraries[0]}" "$pkgdir/usr/lib/bgdesk/${libraries[0]##*/}"
+  ln -s "${libraries[0]##*/}" "$pkgdir/usr/lib/bgdesk/libdrmtap.so.0"
+  rm -f "$pkgdir"/usr/share/bgdesk/libdrmtap.so*
   mkdir -p "${pkgdir}/usr/bin"
   pushd ${pkgdir} && ln -s /usr/share/bgdesk/bgdesk usr/bin/bgdesk && popd
   install -Dm 644 $HBB/res/bgdesk.service -t "${pkgdir}/usr/share/bgdesk/files"

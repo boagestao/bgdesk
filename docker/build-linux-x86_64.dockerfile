@@ -38,6 +38,10 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
         libayatana-appindicator3-dev \
         libclang-dev \
         libfuse2 \
+        libdrm-dev \
+        libegl1-mesa-dev \
+        libgles2-mesa-dev \
+        meson \
         libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev \
         libgtk-3-dev \

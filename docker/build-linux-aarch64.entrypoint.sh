@@ -108,9 +108,16 @@ build_rust() {
   # Sempre roda cargo build: sem --force o Cargo recompila só o que mudou.
   # --force limpa target/release antes (clean_for_force_rebuild).
   # target/ vive em volume Docker (não no bind-mount do host) para fingerprints estáveis.
-  local features="hwcodec,flutter,unix-file-copy-paste"
+  local feature_args=(--flutter --hwcodec --unix-file-copy-paste --print-features)
+  if [[ "${1:-native}" == appimage ]]; then
+    feature_args+=(--no-drm)
+  fi
   if [[ "${BGDESK_CLIENTE}" == "1" ]]; then
-    features="${features},incoming-only"
+    feature_args+=(--incoming-only)
+  fi
+  local features
+  features="$(python3 ./build.py "${feature_args[@]}")"
+  if [[ "${BGDESK_CLIENTE}" == "1" ]]; then
     log "features: ${features} (modo cliente)"
   else
     log "features: ${features} (modo suporte)"
@@ -141,14 +148,6 @@ build_deb() {
   if [[ "${BGDESK_CLIENTE}" == "1" ]]; then
     py_args+=(--incoming-only)
   fi
-  if [[ "${FORCE_REBUILD}" != "1" ]] && \
-     { [[ -f "${out}" ]] || [[ -f "${BGDESK_BUILD_OUT_DIR}/${out}" ]]; }; then
-    log "${out} already exists, skipping deb build (use --force to rebuild)"
-    if [[ ! -f "${out}" && -f "${BGDESK_BUILD_OUT_DIR}/${out}" ]]; then
-      cp -f "${BGDESK_BUILD_OUT_DIR}/${out}" "${out}"
-    fi
-    return
-  fi
   log "building .deb package..."
   prepare_flutter
   chmod -R 755 res/DEBIAN
@@ -167,15 +166,6 @@ build_deb() {
 
 build_rpm() {
   local rpm_out="${PKG_NAME}-${ARCH_SUFFIX}.rpm"
-  if [[ "${FORCE_REBUILD}" != "1" ]] && \
-     { [[ -f "${rpm_out}" ]] || [[ -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" ]]; }; then
-    log "${rpm_out} already exists, skipping rpm build (use --force to rebuild)"
-    if [[ ! -f "${rpm_out}" && -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" ]]; then
-      cp -f "${BGDESK_BUILD_OUT_DIR}/${rpm_out}" "${rpm_out}"
-    fi
-    return
-  fi
-
   local bundle=""
   for candidate in \
     flutter/build/linux/arm64/release/bundle \
@@ -241,7 +231,9 @@ build_appimage() {
   local work="/tmp/bgdesk-appimage"
   rm -rf "${work}"
   mkdir -p "${work}/appimage" "${work}/res"
-  cp "${deb}" "${work}/appimage/bgdesk.deb"
+  # Keep AppImage's original feature set and recipes; it must not inherit native DRM.
+  build_rust appimage
+  python3 scripts/prepare-appimage-deb.py "${deb}" target/release/libbgdesk.so "${work}/appimage/bgdesk.deb"
   cp appimage/AppImageBuilder-aarch64.yml "${work}/appimage/"
   cp res/{32x32,64x64,128x128}.png res/scalable.svg "${work}/res/" 2>/dev/null || cp -r res/* "${work}/res/"
 

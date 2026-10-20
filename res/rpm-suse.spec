@@ -1,9 +1,10 @@
 Name:       bgdesk
 Version:    1.1.9
 Release:    0
-Summary:    RPM package
+Summary:    BGDesk with unattended Wayland and X11 access
 License:    GPL-3.0
 Requires:   gtk3 libxcb1 libXfixes3 alsa-utils libXtst6 libva2 gstreamer-plugins-base gstreamer-plugin-pipewire
+Requires:   libdrm2 >= 2.4.101, libEGL.so.1()(64bit), libGLESv2.so.2()(64bit)
 Recommends: libayatana-appindicator3-1 xdotool
 
 %description
@@ -31,7 +32,11 @@ install $HBB/res/scalable.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps
 install $HBB/res/bgdesk.desktop %{buildroot}/usr/share/bgdesk/files/
 install $HBB/res/bgdesk-link.desktop %{buildroot}/usr/share/bgdesk/files/
 
+python3 "${HBB}/scripts/stage-linux-drm.py" "${HBB}/target/release" --root "%{buildroot}"
+
 %files
+%dir /usr/lib/bgdesk
+/usr/lib/bgdesk/libdrmtap.so.0*
 /usr/share/bgdesk/bgdesk
 /usr/share/bgdesk/libsciter-gtk.so
 /usr/share/bgdesk/files/bgdesk.service

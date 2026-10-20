@@ -1,11 +1,12 @@
 Name:       bgdesk
 Version:    1.5.1
 Release:    0
-Summary:    RPM package
+Summary:    BGDesk with unattended Wayland and X11 access
 License:    GPL-3.0
 URL:        https://boagestao.com.br
 Vendor:     bgdesk <contato@boagestao.com.br>
 Requires:   gtk3 libxcb libXfixes alsa-lib libva2 gstreamer1-plugins-base
+Requires:   libdrm >= 2.4.101, libEGL.so.1()(64bit), libGLESv2.so.2()(64bit)
 Recommends: libayatana-appindicator-gtk3 libxdo
 
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/
@@ -35,7 +36,11 @@ install $HBB/res/scalable.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps
 install $HBB/res/bgdesk.desktop %{buildroot}/usr/share/bgdesk/files/
 install $HBB/res/bgdesk-link.desktop %{buildroot}/usr/share/bgdesk/files/
 
+python3 "${HBB}/scripts/stage-linux-drm.py" "${HBB}/target/release" --root "%{buildroot}"
+
 %files
+%dir /usr/lib/bgdesk
+/usr/lib/bgdesk/libdrmtap.so.0*
 /usr/share/bgdesk/bgdesk
 /usr/share/bgdesk/libsciter-gtk.so
 /usr/share/bgdesk/files/bgdesk.service
@@ -43,7 +48,6 @@ install $HBB/res/bgdesk-link.desktop %{buildroot}/usr/share/bgdesk/files/
 /usr/share/icons/hicolor/scalable/apps/bgdesk.svg
 /usr/share/bgdesk/files/bgdesk.desktop
 /usr/share/bgdesk/files/bgdesk-link.desktop
-/usr/share/bgdesk/files/__pycache__/*
 
 %changelog
 # let's skip this for now

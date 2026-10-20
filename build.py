@@ -74,9 +74,6 @@ def ensure_cargo_on_path() -> None:
     sys.exit(1)
 
 
-ensure_cargo_on_path()
-
-
 def use_flutter_github() -> bool:
     """Clone GitHub master + engine local: apenas se BGDESK_FLUTTER_GITHUB=1."""
     return osx and os.environ.get('BGDESK_FLUTTER_GITHUB') == '1'
@@ -318,12 +315,17 @@ def make_parser():
         dest='incoming_only',
         help='Build cliente edition (incoming connections only, no outgoing)',
     )
-    parser.add_argument(
+    drm_options = parser.add_mutually_exclusive_group()
+    drm_options.add_argument(
         '--drm',
+        dest='drm',
         action='store_true',
         help='Linux only: build the DRM/KMS capture backend (bundles libdrmtap.so, '
-             'dlopen-ed in-process by the root service). Off by default.'
+             'dlopen-ed in-process by the root service). Enabled by default on Linux.'
     )
+    drm_options.add_argument('--no-drm', dest='drm', action='store_false',
+                             help='Build without unattended Wayland capture (portable builds).')
+    parser.set_defaults(drm=not windows and not osx)
     parser.add_argument(
         '--print-features',
         action='store_true',
@@ -473,24 +475,6 @@ def external_resources(flutter, args, res_dir):
                 shutil.copytree(f, f'{flutter_build_dir_2}{f.stem}')
 
 
-def linux_packaging_branch():
-    """Which packaging path `main()` will take on THIS host.
-
-    MUST mirror the elif chain in main() (pacman / yum / zypper / else), and exists so `--drm` can
-    refuse a branch that is not drm-aware instead of silently producing a stock-named package with
-    the capture backend compiled in. Only the final `deb` branch reaches `build_flutter_deb`, which
-    is what bundles libdrmtap, renames the package, adds Conflicts/Provides and asserts the staged
-    binary really is a drm build.
-    """
-    if os.path.isfile('/usr/bin/pacman'):
-        return 'pacman'
-    if os.path.isfile('/usr/bin/yum'):
-        return 'yum'
-    if os.path.isfile('/usr/bin/zypper'):
-        return 'zypper'
-    return 'deb'
-
-
 def get_features(args):
     features = ['inline'] if not args.flutter else []
     if args.hwcodec:
@@ -507,23 +491,9 @@ def get_features(args):
         # DRM build without being one.
         if windows or osx:
             raise Exception('--drm is Linux only')
-        # And only on the deb branch. The other three Linux paths (pacman/yum/zypper) package
-        # straight from `target/release` without bundling libdrmtap, without the rename, without
-        # Conflicts/Provides and without assert_staged_binary_is_drm() -- so they would emit a
-        # package NAMED `rustdesk` carrying the consent-bypass backend and the root-side uinput
-        # injection. The separate package name is the informed consent this feature rests on, so
-        # refuse rather than ship a stock-named build of it.
-        branch = linux_packaging_branch()
-        if branch != 'deb':
-            raise Exception(
-                f'--drm is only supported on the deb packaging path; this host would package via '
-                f'{branch}, which cannot bundle libdrmtap or name the package distinctly')
         features.append('drm')
-        # The display wake is its own compile gate on top of `drm`, and the unattended package is
-        # exactly where it belongs: that variant exists to reach a machine nobody is sitting at,
-        # and a machine whose screen went dark is the case it is for. Dropping `drm-wake` from
-        # this line builds the same capture backend with no wake code in the binary at all.
-        # It is ALSO switchable at runtime; see OPTION_ENABLE_DRM_DISPLAY_WAKE.
+        # Native packages include the wake path for displays disabled by idle. It remains
+        # switchable at runtime through OPTION_ENABLE_DRM_DISPLAY_WAKE.
         features.append('drm-wake')
     if osx:
         if args.screencapturekit:
@@ -819,9 +789,6 @@ def _assert_so_has_egl(so_path):
             'libgles2-mesa-dev; Arch: mesa libglvnd).')
 
 
-DRM_PACKAGE_NAME = 'bgdesk-unattended-wayland'
-
-
 def assert_so_satisfies_the_runtime_abi_gate(so_path):
     """The .so we are about to ship must be one the RUNTIME will actually accept.
 
@@ -871,20 +838,39 @@ def assert_so_satisfies_the_runtime_abi_gate(so_path):
           f'(major {major}, minor {minor}, patch >= {floor[1]})')
 
 
-def stage_libdrmtap_into_deb(so_path):
-    # Put the built libdrmtap object plus its soname symlink into the staged deb. Only the soname
-    # symlink is needed: libdrmtap is resolved by ABSOLUTE path (/usr/lib/bgdesk/libdrmtap.so.0) at
-    # the in-process dlopen site (drmtap_dl.rs), so the deb does NOT drop /usr/lib/bgdesk into the
-    # system-wide /etc/ld.so.conf.d search path, which would let this private library shadow a system
-    # library for every binary on the host (Debian Policy 10.2 forbids that). No ld.so.conf.d drop-in
-    # and no ldconfig trigger are shipped, so the stock postinst is used unchanged.
-    assert_so_satisfies_the_runtime_abi_gate(so_path)
-    so_basename = os.path.basename(so_path)
-    system2('mkdir -p tmpdeb/usr/lib/bgdesk')
-    # Quoted: so_path comes from the repo root or from DRMTAP_PREBUILT_DIR, either of which can
-    # contain a space, and an unquoted interpolation would split the argument and fail obscurely.
-    system2(f'cp "{so_path}" tmpdeb/usr/lib/bgdesk/')
-    system2(f'ln -sf "{so_basename}" tmpdeb/usr/lib/bgdesk/libdrmtap.so.0')
+def validated_bundle_drmtap(payload):
+    """Require an actual DRM binary and an EGL-capable library with the pinned ABI."""
+    assert_staged_binary_is_drm(payload)
+    so = _single_real_so(glob.glob(os.path.join(payload, 'libdrmtap.so.0.*')), payload)
+    _assert_so_has_egl(so)
+    _assert_so_has_no_helper(so)
+    assert_so_satisfies_the_runtime_abi_gate(so)
+    return so
+
+
+def prepare_drm_bundle(payload):
+    """Carry the library alongside the bundle so DEB, RPM and offline Arch reuse it."""
+    assert_staged_binary_is_drm(payload)
+    if not glob.glob(os.path.join(payload, 'libdrmtap.so.0.*')):
+        so = build_libdrmtap_so()
+        shutil.copy2(so, os.path.join(payload, os.path.basename(so)))
+    return validated_bundle_drmtap(payload)
+
+
+def stage_bundle_drmtap(payload, package_root):
+    """Install at the absolute dlopen path, independent of RPM's lib/lib64 macros."""
+    so = validated_bundle_drmtap(payload)
+    destination = Path(package_root) / 'usr/lib/bgdesk'
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(so, str(destination / os.path.basename(so)))
+    soname = destination / 'libdrmtap.so.0'
+    if soname.is_symlink() or soname.exists():
+        soname.unlink()
+    soname.symlink_to(os.path.basename(so))
+    # The bundle is an intermediate; the installed library belongs only at the private path.
+    installed_payload = Path(package_root) / 'usr/share/bgdesk'
+    for extra in installed_payload.glob('libdrmtap.so*'):
+        extra.unlink()
 
 
 def _max_glibc_minor(path):
@@ -902,51 +888,29 @@ def _max_glibc_minor(path):
             tail = chunk[-16:]
 
 
-def measured_glibc_floor():
-    # libdrmtap is built on a newer base than the rest of the deb, so the floor is whichever staged
-    # object is higher -- and it moves whenever either base does.
-    paths = [p for p in glob.glob('tmpdeb/usr/lib/bgdesk/libdrmtap.so.0.*')
-             + glob.glob('tmpdeb/usr/share/bgdesk/lib/libbgdesk.so')
-             + glob.glob('tmpdeb/usr/share/bgdesk/rustdesk')
-             if os.path.isfile(p) and not os.path.islink(p)]
-    minor = max((_max_glibc_minor(p) for p in paths), default=0)
-    if not minor:
-        raise Exception(
-            f'could not measure a GLIBC_2.x floor from any staged object ({paths or "none found"}); '
-            'refusing to ship the unattended-wayland variant with an undeclared libc6 floor, which '
-            'is what lets it install on a host where libdrmtap can never load')
-    return f'2.{minor}'
-
-
-def retarget_control_to_drm_variant():
-    # Rewrite the control file that generate_control_file just produced, instead of parameterizing that
-    # function: the stock packaging path stays exactly as upstream wrote it, and everything specific to
-    # this variant lives here. The variant installs the same files as the stock package, so it must
-    # conflict with and replace it: you install one or the other, never both. It also needs libdrmtap's
-    # own runtime deps, which the stock package has no reason to carry.
-    path = '../res/DEBIAN/control'
-    floor = measured_glibc_floor()
-    print(f'[drm] {DRM_PACKAGE_NAME} libc6 floor measured at {floor}')
-    with open(path) as f:
+def add_drm_deb_dependencies(control_path):
+    """Keep the normal package name; Wayland unattended is now the native default."""
+    root = str(Path(control_path).parent.parent)
+    libraries = glob.glob(os.path.join(root, 'usr/lib/bgdesk/libdrmtap.so.0.*'))
+    if not libraries:
+        raise Exception('cannot declare DRM dependencies without the staged capture library')
+    paths = libraries + [os.path.join(root, path) for path in (
+        'usr/share/bgdesk/lib/libbgdesk.so', 'usr/share/bgdesk/bgdesk',
+        'usr/share/bgdesk/rustdesk') if os.path.isfile(os.path.join(root, path))]
+    floor = '2.%d' % max(_max_glibc_minor(path) for path in paths)
+    if floor == '2.0':
+        raise Exception('cannot determine the staged libdrmtap libc6 requirement')
+    with open(control_path) as f:
         lines = f.readlines()
-    out = []
-    for line in lines:
-        if line.startswith('Package: bgdesk'):
-            out.append(f'Package: {DRM_PACKAGE_NAME}\n')
-            out.append('Conflicts: bgdesk\nReplaces: bgdesk\nProvides: bgdesk\n')
-        elif line.startswith('Depends:'):
-            # 2.4.101 is where drmModeGetFB2 landed; below it libdrmtap loads and can never capture.
-            out.append(line.rstrip('\n') + ', libdrm2 (>= 2.4.101), libegl1, libgles2, '
-                       f'libc6 (>= {floor})\n')
-        else:
-            out.append(line)
-    body = ''.join(out)
-    # Fail loudly rather than silently shipping a package that says `rustdesk`: a stock control file
-    # that stopped matching either anchor would otherwise produce a variant deb wearing the stock name.
-    if f'Package: {DRM_PACKAGE_NAME}\n' not in body or 'libegl1' not in body:
-        raise Exception(f'could not retarget {path} to the drm variant; upstream control layout changed')
-    with open(path, 'w') as f:
-        f.write(body)
+    for index, line in enumerate(lines):
+        if line.startswith('Depends:'):
+            lines[index] = (line.rstrip('\n') + ', libdrm2 (>= 2.4.101), libegl1, libgles2, '
+                            'libc6 (>= %s)\n' % floor)
+            break
+    else:
+        raise Exception('missing Depends field in %s' % control_path)
+    with open(control_path, 'w') as f:
+        f.writelines(lines)
 
 
 def build_flutter_deb(version, features):
@@ -988,32 +952,22 @@ def build_flutter_deb(version, features):
         'cp ../res/pam.d/bgdesk.debian tmpdeb/etc/pam.d/bgdesk')
     system2(
         "echo \"#!/bin/sh\" >> tmpdeb/usr/share/bgdesk/files/polkit && chmod a+x tmpdeb/usr/share/bgdesk/files/polkit")
-    # Bundle libdrmtap.so only when this build actually enabled the `drm` feature, so stock packages
-    # stay exactly what they were. The root service dlopens it in-process by absolute path.
-    # `features` is the comma-joined string, so split it: a bare substring test would also match any
-    # future feature merely containing "drm" (drm-lease, vaapi-drm) and rename the deb to the
-    # consent-bypass variant without --drm ever being passed.
     ships_so = 'drm' in features.split(',')
     if ships_so:
-        # Same artifact assertion as the --package path. Under --skip-cargo nothing here rebuilt the
-        # binary, so `features` says what was ASKED for while the staged bundle can be anything.
-        assert_staged_binary_is_drm()
-        stage_libdrmtap_into_deb(build_libdrmtap_so())
+        prepare_drm_bundle(flutter_build_dir)
+        stage_bundle_drmtap(flutter_build_dir, 'tmpdeb')
 
     system2('mkdir -p tmpdeb/DEBIAN')
     generate_control_file(version)
-    if ships_so:
-        retarget_control_to_drm_variant()
     system2('cp -a ../res/DEBIAN/* tmpdeb/DEBIAN/')
+    if ships_so:
+        add_drm_deb_dependencies('tmpdeb/DEBIAN/control')
     md5_file_folder("tmpdeb/")
     system2('chmod 755 tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/prerm tmpdeb/DEBIAN/postrm 2>/dev/null || true'); system2('dpkg-deb -b tmpdeb bgdesk.deb;')
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
     os.rename('bgdesk.deb', '../bgdesk-%s.deb' % version)
-    if ships_so:
-        # Named apart from the stock package so installing the consent-free variant is a deliberate act.
-        os.rename('../bgdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
     os.chdir("..")
 
 
@@ -1040,39 +994,23 @@ def _carries_drmtap_marker(path, marker=DRMTAP_DLOPEN_MARKER):
             tail = chunk[-(len(marker) - 1):]
 
 
-def assert_staged_binary_is_drm():
-    """The staged BINARY must really be a drm build before it is named the unattended-wayland
-    variant. That package conflicts with and replaces the stock one, so shipping a stock binary
-    under that name produces something that can never capture and cannot be installed alongside
-    what it replaced. The marker is the absolute dlopen path from drmtap_dl.rs, present only when
-    the feature is compiled in -- assert what was produced, not what was asked for.
-
-    Called from BOTH packaging paths. It used to guard only one of them, and `--skip-cargo` (which
-    is how CI packages) reaches the other, where nothing had rebuilt the binary at all.
-    """
-    binaries = [p for p in glob.glob('tmpdeb/usr/share/bgdesk/lib/libbgdesk.so')
-                + glob.glob('tmpdeb/usr/share/bgdesk/rustdesk') if os.path.isfile(p)]
-    if not any(_carries_drmtap_marker(p) for p in binaries):
-        raise Exception(
-            f'--drm was requested but the staged bundle does not look like a drm build (no '
-            f'{DRMTAP_DLOPEN_MARKER.decode()} dlopen path in {binaries or "any staged binary"}); '
-            'refusing to package it as the unattended-wayland variant, which conflicts with and '
-            'replaces the stock package but could never capture')
-    # And the WAKE half. `--drm` enables `drm-wake` too (see get_features), and the deb is named and
-    # documented as the variant that can reach a machine whose screen has gone dark. The dlopen
-    # marker above does not distinguish them: `--features drm` alone carries it and has no wake code
-    # at all. Asserting only the first half is how a deb can be named for a feature it does not have.
-    if not any(_carries_drmtap_marker(p, DRMTAP_WAKE_MARKER) for p in binaries):
-        raise Exception(
-            f'--drm was requested but the staged binary has no {DRMTAP_WAKE_MARKER.decode()} '
-            f'marker in {binaries or "any staged binary"}, so it was built without `drm-wake`; '
-            'refusing to package it as the unattended-wayland variant, which is named and '
-            'documented as the build that can wake an idle-disabled display. If this fired under '
-            '--skip-cargo, the cargo line that produced the bundle is missing the feature: '
-            '--features ...,drm,drm-wake')
+def assert_staged_binary_is_drm(payload='tmpdeb/usr/share/bgdesk'):
+    """Inspect the produced binary, including when the caller uses --skip-cargo."""
+    library = os.path.join(payload, 'lib', 'libbgdesk.so')
+    # Flutter's launcher does not contain Rust code. Check its library when present.
+    binaries = ([library] if os.path.isfile(library) else
+                [os.path.join(payload, name) for name in ('bgdesk', 'rustdesk')
+                 if os.path.isfile(os.path.join(payload, name))])
+    for marker in (DRMTAP_DLOPEN_MARKER, DRMTAP_WAKE_MARKER):
+        if not any(_carries_drmtap_marker(p, marker) for p in binaries):
+            raise Exception(
+                'native Wayland package requires a binary built with drm,drm-wake; '
+                'missing %s in %s. Rebuild Cargo with --features ...,drm,drm-wake '
+                'before packaging with --skip-cargo.' % (marker.decode(), binaries))
 
 
-def build_deb_from_folder(version, binary_folder, want_drm=False):
+def build_deb_from_folder(version, binary_folder, want_drm=True):
+    binary_folder = os.path.abspath(binary_folder)
     os.chdir('flutter')
     system2('mkdir -p tmpdeb/usr/bin/')
     system2('mkdir -p tmpdeb/usr/share/bgdesk')
@@ -1083,7 +1021,7 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
     system2('mkdir -p tmpdeb/usr/share/polkit-1/actions')
     system2('rm tmpdeb/usr/bin/bgdesk || true')
     system2(
-        f'cp -r ../{binary_folder}/* tmpdeb/usr/share/bgdesk/')
+        f'cp -r "{binary_folder}"/* tmpdeb/usr/share/bgdesk/')
     system2(
         'cp ../res/bgdesk.service tmpdeb/usr/share/bgdesk/files/systemd/')
     system2(
@@ -1096,64 +1034,23 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
         'cp ../res/bgdesk-link.desktop tmpdeb/usr/share/applications/bgdesk-link.desktop')
     system2(
         "echo \"#!/bin/sh\" >> tmpdeb/usr/share/bgdesk/files/polkit && chmod a+x tmpdeb/usr/share/bgdesk/files/polkit")
-    # Where the capture library comes from for a `--package <folder> --drm` build. Two shapes are
-    # supported, because two exist in practice: a bundle that already carries libdrmtap.so.0.*
-    # (someone staged it, e.g. a CI artifact), and a plain bundle, which is what every build path
-    # here actually produces -- the flutter deb builds the library straight into the staged deb, so
-    # nothing ever puts it inside the bundle folder. Demanding it in the bundle made this flag
-    # combination impossible to satisfy.
-    bundled_glob = glob.glob('tmpdeb/usr/share/bgdesk/libdrmtap.so.0.*')
-    bundle_carries_so = any(os.path.isfile(p) and not os.path.islink(p) for p in bundled_glob)
-    # The variant must be decided by the EXPLICIT --drm request, not merely by what happens to be
-    # staged: a bundle that carries the .so must NOT be shipped as the consent-bypass variant when
-    # --drm was never passed.
-    if bundle_carries_so and not want_drm:
-        raise Exception(
-            'the staged bundle carries libdrmtap.so.0.* but --drm was not passed; refusing '
-            'to silently ship the consent-bypass unattended-wayland variant (pass --drm to '
-            'build it deliberately)')
     if want_drm:
-        # Whichever shape we are in, the staged BINARY must really be a drm build. This is the
-        # property the old presence-of-the-.so test stood in for, badly: a stock binary packaged as
-        # the unattended-wayland variant would carry the consent-bypass name, conflict with and
-        # replace the stock package, and never be able to capture. The marker is the absolute
-        # dlopen path from drmtap_dl.rs, present only when the feature is compiled in -- the same
-        # kind of artifact assertion as _assert_so_has_egl, and for the same reason: assert what
-        # was produced, not what was asked for.
-        assert_staged_binary_is_drm()
-        if bundle_carries_so:
-            so = _single_real_so(bundled_glob, 'the staged --drm bundle')
-            # The THIRD artifact source, and the last one that was missing the check: --package
-            # takes the .so straight out of a bundle somebody else produced, so it has the same
-            # exposure as DRMTAP_PREBUILT_DIR (see the comment on that branch). A CPU-only stub
-            # would ship, the loader would accept it, and capture would degrade to PipeWire
-            # without a word. A bundle produced before the helper was disabled is caught here too,
-            # which is the point: it must not be repackaged into a deb.
-            _assert_so_has_egl(so)
-            _assert_so_has_no_helper(so)
-            stage_libdrmtap_into_deb(so)
-            system2(f'rm -f "{so}"')
-            system2('rm -f tmpdeb/usr/share/bgdesk/libdrmtap.so tmpdeb/usr/share/bgdesk/libdrmtap.so.0')
-        else:
-            # Build it here, exactly as the flutter deb path does (build_libdrmtap_so asserts the
-            # EGL backend itself). The library is independent of the staged binary.
-            stage_libdrmtap_into_deb(build_libdrmtap_so())
+        prepare_drm_bundle(binary_folder)
+        stage_bundle_drmtap(binary_folder, 'tmpdeb')
+    elif glob.glob('tmpdeb/usr/share/bgdesk/libdrmtap.so*'):
+        raise Exception('--no-drm bundle must not carry libdrmtap')
 
     system2('mkdir -p tmpdeb/DEBIAN')
     generate_control_file(version)
-    # Keyed on the EXPLICIT request, not on what happened to be staged: by here a --drm build has
-    # its library in tmpdeb whichever of the two shapes it came from.
-    if want_drm:
-        retarget_control_to_drm_variant()
     system2('cp -a ../res/DEBIAN/* tmpdeb/DEBIAN/')
+    if want_drm:
+        add_drm_deb_dependencies('tmpdeb/DEBIAN/control')
     md5_file_folder("tmpdeb/")
     system2('chmod 755 tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/prerm tmpdeb/DEBIAN/postrm 2>/dev/null || true'); system2('dpkg-deb -b tmpdeb bgdesk.deb;')
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
     os.rename('bgdesk.deb', '../bgdesk-%s.deb' % version)
-    if want_drm:
-        os.rename('../bgdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
     os.chdir("..")
 
 
@@ -1203,6 +1100,8 @@ def build_flutter_arch_manjaro(version, features):
     os.chdir('flutter')
     system2(flutter_linux_build_cmd)
     system2(f'strip {flutter_build_dir}/lib/libbgdesk.so')
+    if 'drm' in features.split(','):
+        prepare_drm_bundle(flutter_build_dir)
     os.chdir('../res')
     system2('HBB=`pwd`/.. FLUTTER=1 makepkg -f')
 
@@ -1259,6 +1158,9 @@ def main():
         print(feats)
         return
 
+    if not args.skip_cargo and not args.package:
+        ensure_cargo_on_path()
+
     if os.path.exists(exe_path):
         os.unlink(exe_path)
     if os.path.isfile('/usr/bin/pacman'):
@@ -1266,7 +1168,7 @@ def main():
     version = get_version()
     features = ','.join(get_features(args))
     flutter = args.flutter
-    if not flutter:
+    if not flutter and not args.package:
         system2('python3 res/inline-sciter.py')
     print(args.skip_cargo)
     if args.skip_cargo:
@@ -1316,6 +1218,8 @@ def main():
             rename_linux_artifacts()
             system2('git checkout src/ui/common.tis')
             system2('strip target/release/bgdesk')
+            if args.drm:
+                prepare_drm_bundle('target/release')
             system2('ln -s res/pacman_install && ln -s res/PKGBUILD')
             system2('HBB=`pwd` makepkg -f')
         system2('mv bgdesk-%s-0-x86_64.pkg.tar.zst bgdesk-%s-manjaro-arch.pkg.tar.zst' % (
@@ -1325,6 +1229,8 @@ def main():
         system2('cargo build --release --features ' + features)
         rename_linux_artifacts()
         system2('strip target/release/bgdesk')
+        if args.drm:
+            prepare_drm_bundle('target/release')
         system2(
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm.spec" % version)
         system2('HBB=`pwd` rpmbuild -ba res/rpm.spec')
@@ -1336,6 +1242,8 @@ def main():
         system2('cargo build --release --features ' + features)
         rename_linux_artifacts()
         system2('strip target/release/bgdesk')
+        if args.drm:
+            prepare_drm_bundle('target/release')
         system2(
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm-suse.spec" % version)
         system2('HBB=`pwd` rpmbuild -ba res/rpm-suse.spec')
@@ -1423,13 +1331,18 @@ def main():
                 system2('mkdir -p tmpdeb/usr/share/bgdesk')
                 system2('mv tmpdeb/usr/bin/bgdesk tmpdeb/usr/share/bgdesk/')
                 system2('cp libsciter-gtk.so tmpdeb/usr/share/bgdesk/')
+                if args.drm:
+                    prepare_drm_bundle('tmpdeb/usr/share/bgdesk')
+                    stage_bundle_drmtap('tmpdeb/usr/share/bgdesk', 'tmpdeb')
+                    add_drm_deb_dependencies('tmpdeb/DEBIAN/control')
                 md5_file_folder("tmpdeb/")
                 system2('dpkg-deb -b tmpdeb bgdesk.deb; /bin/rm -rf tmpdeb/')
                 os.rename('bgdesk.deb', 'bgdesk-%s.deb' % version)
 
 
 def md5_file(fn):
-    md5 = hashlib.md5(open('tmpdeb/' + fn, 'rb').read()).hexdigest()
+    with open('tmpdeb/' + fn, 'rb') as source:
+        md5 = hashlib.md5(source.read()).hexdigest()
     system2('echo "%s  /%s" >> tmpdeb/DEBIAN/md5sums' % (md5, fn))
 
 def md5_file_folder(base_dir):

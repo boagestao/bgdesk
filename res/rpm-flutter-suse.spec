@@ -1,11 +1,12 @@
 Name:       bgdesk
 Version:    1.5.1
 Release:    0
-Summary:    RPM package
+Summary:    BGDesk with unattended Wayland and X11 access
 License:    GPL-3.0
 URL:        https://boagestao.com.br
 Vendor:     bgdesk <contato@boagestao.com.br>
 Requires:   gtk3 libxcb1 libXfixes3 alsa-utils libXtst6 libva2 gstreamer-plugins-base gstreamer-plugin-pipewire
+Requires:   libdrm2 >= 2.4.101, libEGL.so.1()(64bit), libGLESv2.so.2()(64bit)
 Recommends: libayatana-appindicator3-1 xdotool
 Provides:   libdesktop_drop_plugin.so()(64bit), libdesktop_multi_window_plugin.so()(64bit), libfile_selector_linux_plugin.so()(64bit), libflutter_custom_cursor_plugin.so()(64bit), libflutter_linux_gtk.so()(64bit), libscreen_retriever_plugin.so()(64bit), libtray_manager_plugin.so()(64bit), liburl_launcher_linux_plugin.so()(64bit), libwindow_manager_plugin.so()(64bit), libwindow_size_plugin.so()(64bit), libtexture_rgba_renderer_plugin.so()(64bit)
 
@@ -28,7 +29,11 @@ install -Dm 644 $HBB/res/bgdesk-link.desktop -t "%{buildroot}/usr/share/bgdesk/f
 install -Dm 644 $HBB/res/128x128@2x.png "%{buildroot}/usr/share/icons/hicolor/256x256/apps/bgdesk.png"
 install -Dm 644 $HBB/res/scalable.svg "%{buildroot}/usr/share/icons/hicolor/scalable/apps/bgdesk.svg"
 
+python3 "${HBB}/scripts/stage-linux-drm.py" "${HBB}/flutter/build/linux/x64/release/bundle" --root "%{buildroot}"
+
 %files
+%dir /usr/lib/bgdesk
+/usr/lib/bgdesk/libdrmtap.so.0*
 /usr/share/bgdesk/*
 /usr/share/bgdesk/files/bgdesk.service
 /usr/share/icons/hicolor/256x256/apps/bgdesk.png

@@ -17,6 +17,8 @@ done
 [[ -x "$bundle/bgdesk" && -d "$bundle/lib" && -d "$bundle/data" ]] || {
   echo "Missing compiled Linux x64 Flutter bundle: $bundle" >&2; exit 1;
 }
+# Reject a stale X11-only bundle or an incompatible capture library before packaging.
+python3 "$root/scripts/stage-linux-drm.py" "$bundle"
 version="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["package"]["version"])' "$root/Cargo.toml")"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid stable version' >&2; exit 1; }
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/bgdesk-arch.XXXXXX")"
@@ -42,6 +44,7 @@ docker run --rm --platform linux/amd64 --network none \
     pacman -Qip "$package"
     bsdtar -tf "$package" | grep -qx usr/lib/systemd/system/bgdesk.service
     bsdtar -tf "$package" | grep -qx .INSTALL
+    bsdtar -tf "$package" | grep -qx usr/lib/bgdesk/libdrmtap.so.0
   '
 mkdir -p "$output"
 cp "$work/bgdesk-$edition-$version-1-x86_64.pkg.tar.zst" "$output/bgdesk-$edition-x86_64.pkg.tar.zst"

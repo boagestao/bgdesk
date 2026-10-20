@@ -216,6 +216,29 @@ Referências: [certificados no GitHub Actions](https://docs.github.com/en/action
 [tokens do R2](https://developers.cloudflare.com/r2/api/tokens/),
 [domínios públicos do R2](https://developers.cloudflare.com/r2/buckets/public-buckets/).
 
+## Linux: Wayland nos pacotes instaláveis
+
+DEB, RPM e Arch incluem por padrão a captura DRM/KMS (`drm` e `drm-wake`),
+para acesso unattended em sessões Wayland, e continuam atendendo sessões X11.
+Isso vale para as edições cliente e suporte. Os nomes habituais dos pacotes são
+mantidos; não é necessário escolher uma variante `unattended-wayland`.
+
+O serviço `bgdesk.service` executa como root, captura pelo DRM e usa `/dev/uinput`
+para teclado, mouse e despertar de telas apagadas por inatividade. A biblioteca
+privada é instalada em `/usr/lib/bgdesk/libdrmtap.so.0`, com dependências de DRM,
+EGL e GLES declaradas no pacote. O funcionamento depende do suporte da GPU/driver;
+isso não cria um monitor virtual e não desperta um computador suspenso.
+
+`build.py` habilita as features automaticamente no Linux. Os builds que compilam
+Cargo separadamente devem consultar `--print-features`, inclusive antes de usar
+`--skip-cargo`. O empacotamento rejeita um binário antigo sem DRM ou uma biblioteca
+de captura incompatível. Para atualizar as imagens Docker existentes, use
+`./build.sh linux-x86_64 --rebuild-image` ou a variante `linux-aarch64`.
+
+O AppImage conserva suas receitas e configuração anteriores. Seu payload Rust é
+compilado separadamente com `--no-drm`, sem a biblioteca de captura privilegiada.
+A preparação do AppImage não altera o DEB distribuído nem o bundle usado por Arch.
+
 ## Arch Linux x86_64
 
 Os pacotes `bgdesk-cliente` e `bgdesk-suporte` são alternativas que usam os mesmos

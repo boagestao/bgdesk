@@ -24,6 +24,7 @@ class ArchPackageTests(unittest.TestCase):
             (bundle / 'lib/libbgdesk.so').write_bytes(b'compiled library')
             (bundle / 'lib/alias.so').symlink_to('libbgdesk.so')
             (bundle / 'data/assets').write_bytes(b'Flutter assets')
+            (bundle / 'libdrmtap.so.0.5.12').write_bytes(b'capture library')
             for name in ('bgdesk.service', 'bgdesk.desktop', 'bgdesk-link.desktop',
                          '128x128@2x.png', 'scalable.svg', 'startwm.sh'):
                 shutil.copyfile(ROOT / 'res' / name, stage / name)
@@ -47,6 +48,10 @@ class ArchPackageTests(unittest.TestCase):
                 self.assertIn('WantedBy=multi-user.target', service)
                 self.assertTrue((output / 'usr/share/applications/bgdesk.desktop').is_file())
                 self.assertFalse((output / 'etc/systemd/system/bgdesk.service').exists())
+                capture = output / 'usr/lib/bgdesk'
+                self.assertEqual((capture / 'libdrmtap.so.0').read_bytes(), b'capture library')
+                self.assertEqual(os.readlink(capture / 'libdrmtap.so.0'), 'libdrmtap.so.0.5.12')
+                self.assertFalse((app / 'libdrmtap.so.0.5.12').exists())
 
     def callbacks(self, live, *callbacks):
         # Simulate the systemd runtime marker; never operate the host's service.
