@@ -17,6 +17,12 @@ cd "$ROOT"
 source "$ROOT/scripts/build-out-dir.sh"
 
 MODE="${1:-}"
+WIN_ARCH="${2:-x86_64}"
+case "$WIN_ARCH" in
+  x86) WIN_SUFFIX=win32 ;;
+  x86_64) WIN_SUFFIX=win64 ;;
+  *) echo "[installer] Arquitetura Windows inválida: $WIN_ARCH" >&2; exit 1 ;;
+esac
 if [[ "$MODE" != "suporte" && "$MODE" != "cliente" ]]; then
   echo "[installer] Uso: $0 suporte|cliente" >&2
   exit 1
@@ -57,9 +63,9 @@ find_iscc() {
 }
 
 ISS_FILE="$ROOT/installers/${MODE}.iss"
-WIN_OUT_DIR="$ROOT/$(bgdesk_build_out_dir windows x86_64)"
-WIN_APP_DIR="$ROOT/$(bgdesk_windows_app_dir x86_64)"
-INSTALLER_BASE="bgdesk-${MODE}-win64"
+WIN_OUT_DIR="$ROOT/$(bgdesk_build_out_dir windows "$WIN_ARCH")"
+WIN_APP_DIR="$ROOT/$(bgdesk_windows_app_dir "$WIN_ARCH")"
+INSTALLER_BASE="bgdesk-${MODE}-${WIN_SUFFIX}"
 INSTALLER_OUT="$WIN_OUT_DIR/${INSTALLER_BASE}.exe"
 
 if [[ ! -f "$ISS_FILE" ]]; then
@@ -87,7 +93,7 @@ fi
 
 mkdir -p "$WIN_OUT_DIR"
 log "compilando $INSTALLER_BASE.exe ..."
-"$ISCC" "$ISS_FILE"
+MSYS2_ARG_CONV_EXCL=/DBuildArch= "$ISCC" "$ISS_FILE" "/DBuildArch=$WIN_ARCH"
 
 if [[ ! -f "$INSTALLER_OUT" ]]; then
   echo "[installer] ERRO: saída esperada não encontrada: $INSTALLER_OUT" >&2

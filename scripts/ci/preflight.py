@@ -19,6 +19,9 @@ TARGETS = [
 ]
 
 def distribution_matrix(platforms):
+    # Validate Win32 separately before adding it to the complete release matrix.
+    if platforms == 'windows-x86':
+        return {'include': [dict(platform='windows', arch='x86', runner='windows-2022')]}
     return {"include": [
         dict(platform=platform, arch=arch, runner=runner)
         for platform, arch, runner in TARGETS

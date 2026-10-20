@@ -234,11 +234,26 @@ os feeds. Arch Linux ARM não está incluído neste pacote x86_64.
 ## Validação individual e Releases imediatas
 
 O seletor manual aceita `linux-x86_64`, `linux-aarch64`, `macos-aarch64`,
-`macos-x86_64` e `windows-x86_64`, além dos grupos por sistema e `all`.
+`macos-x86_64`, `windows-x86_64` e `windows-x86`, além dos grupos por sistema e `all`.
 Cada alvo continua compilando cliente e suporte em sequência na mesma máquina.
-A ordem de validação atual é Linux x64, Linux ARM, macOS Intel (que ainda falhou),
-Windows x64 e então `all` com publicação. macOS ARM já passou nas duas edições.
-Win32 será iniciado somente depois do deploy completo das plataformas atuais.
+Linux x64, Linux ARM, macOS Intel, macOS ARM e Windows x64 já passaram; o deploy
+completo 1.5.1 foi validado, incluindo os 22 arquivos e feeds assinados.
+
+`windows-x86` inicia agora a validação Win32, com `publish=false`. Flutter não
+oferece Windows de 32 bits; esse alvo usa a interface Sciter existente, incluindo
+a edição cliente com `incoming-only`. O runner usa Rust nightly-2026-09-01 e
+`i686-pc-windows-msvc`, dependências `x86-windows-static`, binding Sciter fixado
+no commit `674e07d3066ca9a92ced3816203ab6b652629d1e` e DLL fixada por commit e
+SHA256. A troca do binding ocorre apenas no checkout descartável Win32 e mantém
+todas as outras dependências do lockfile. Não instala Flutter nesse runner.
+
+São produzidos `bgdesk-<edição>-win32.exe` (Inno com serviço unattended) e
+`bgdesk-<edição>-update-win32.exe` (atualizador nativo), ambos assinados e com
+timestamp. A arquitetura PE32, versão do executável e abertura de janela Sciter
+são verificadas antes de salvar os artefatos e publicar a pré-release.
+Win32 ainda não entra em `all` ou no R2: primeiro precisam passar ambas as
+edições. A integração final usará nova versão para preservar a imutabilidade
+da 1.5.1 e manter os cinco runners, incluindo as arquiteturas Windows em sequência.
 
 Assim que uma edição termina, seu instalador é salvo como artefato do Actions
 **e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome

@@ -12,9 +12,12 @@ def specs(platform, arch, edition):
     if platform == "macos":
         return [("dmg", Path(f"build/macOS-{arch}-{edition}/bgdesk-{edition}-darwin.dmg"))]
     if platform == "windows":
-        directory = Path(f"build/windows-x86_64-{edition}")
-        return [("exe", directory / f"bgdesk-{edition}-update-win64.exe"),
-                ("inno-exe", directory / f"bgdesk-{edition}-win64.exe")]
+        if arch not in {'x86', 'x86_64'}:
+            raise ValueError('Unsupported Windows architecture')
+        directory = Path(f"build/windows-{arch}-{edition}")
+        suffix = 'win32' if arch == 'x86' else 'win64'
+        return [("exe", directory / f"bgdesk-{edition}-update-{suffix}.exe"),
+                ("inno-exe", directory / f"bgdesk-{edition}-{suffix}.exe")]
     directory = Path(f"build/linux-{arch}-{edition}")
     formats = ("deb", "rpm", "AppImage") + (("pkg.tar.zst",) if arch == "x86_64" else ())
     return [(fmt, directory / f"bgdesk-{edition}-{arch}.{fmt}") for fmt in formats]
@@ -23,7 +26,7 @@ def specs(platform, arch, edition):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("platform", choices=("macos", "windows", "linux"))
-    parser.add_argument("arch", choices=("aarch64", "x86_64"))
+    parser.add_argument("arch", choices=("aarch64", "x86_64", "x86"))
     parser.add_argument("edition", choices=("cliente", "suporte"))
     parser.add_argument("--output", type=Path, default=Path("release-artifacts"))
     args = parser.parse_args()

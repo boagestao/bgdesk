@@ -35,43 +35,80 @@ runs:
         [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente mac)
         bash build.sh "${args[@]}"
     - name: Build Windows app and installer
-      if: inputs.platform == 'windows'
+      if: inputs.platform == 'windows' && inputs.arch == 'x86_64'
       shell: bash
       run: |
         # The shared bridge artifact is already in the workspace.
         args=(windows)
         [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente windows)
         bash build.sh "${args[@]}"
+    - name: Build Win32 app with the existing Sciter UI
+      if: inputs.platform == 'windows' && inputs.arch == 'x86'
+      shell: bash
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: python scripts/ci/build-windows-x86.py --edition "$EDITION"
     - name: Sign Windows app
       if: inputs.platform == 'windows'
       shell: pwsh
       env:
         EDITION: ${{ inputs.edition }}
-      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/extracted/bgdesk.exe"
+        ARCH: ${{ inputs.arch }}
+      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-${env:ARCH}-$env:EDITION/extracted/bgdesk.exe"
     - name: Rebuild Inno installer containing the signed app
       if: inputs.platform == 'windows'
       shell: bash
       env:
         EDITION: ${{ inputs.edition }}
-      run: bash installers/build-installer.sh "$EDITION"
+        ARCH: ${{ inputs.arch }}
+      run: bash installers/build-installer.sh "$EDITION" "$ARCH"
     - name: Sign Windows installer
       if: inputs.platform == 'windows'
       shell: pwsh
       env:
         EDITION: ${{ inputs.edition }}
-      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-win64.exe"
+        ARCH: ${{ inputs.arch }}
+      run: |
+        $suffix = if ($env:ARCH -eq 'x86') { 'win32' } else { 'win64' }
+        ./scripts/ci/sign-windows.ps1 -Path "build/windows-${env:ARCH}-$env:EDITION/bgdesk-${env:EDITION}-$suffix.exe"
     - name: Build native Windows update package
       if: inputs.platform == 'windows'
       shell: bash
       env:
         EDITION: ${{ inputs.edition }}
-      run: python scripts/ci/package-windows-update.py --edition "$EDITION"
+        ARCH: ${{ inputs.arch }}
+      run: python scripts/ci/package-windows-update.py --edition "$EDITION" --arch "$ARCH"
     - name: Sign native Windows update package
       if: inputs.platform == 'windows'
       shell: pwsh
       env:
         EDITION: ${{ inputs.edition }}
-      run: ./scripts/ci/sign-windows.ps1 -Path "build/windows-x86_64-$env:EDITION/bgdesk-$env:EDITION-update-win64.exe"
+        ARCH: ${{ inputs.arch }}
+      run: |
+        $suffix = if ($env:ARCH -eq 'x86') { 'win32' } else { 'win64' }
+        ./scripts/ci/sign-windows.ps1 -Path "build/windows-${env:ARCH}-$env:EDITION/bgdesk-${env:EDITION}-update-$suffix.exe"
+    - name: Validate Win32 version and Sciter window
+      if: inputs.platform == 'windows' && inputs.arch == 'x86'
+      shell: pwsh
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: |
+        $app = Resolve-Path "build/windows-x86-$env:EDITION/extracted/bgdesk.exe"
+        python -c "import os,subprocess; from pathlib import Path; app=Path('build/windows-x86-'+os.environ['EDITION']+'/extracted/bgdesk.exe').resolve(); result=subprocess.run([str(app),'--version'],check=True,capture_output=True,text=True,timeout=30); assert result.stdout.strip()==os.environ['BGDESK_VERSION'], 'Win32 version mismatch'"
+        if ($LASTEXITCODE -ne 0) { throw 'Win32 version check failed' }
+        $gui = Start-Process -FilePath $app -ArgumentList '--no-server' -PassThru
+        try {
+          $visible = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            $gui.Refresh()
+            if ($gui.HasExited) { throw "Win32 GUI exited before opening a window: $($gui.ExitCode)" }
+            if ($gui.MainWindowHandle -ne 0) { $visible = $true; break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $visible) { throw 'Win32 Sciter did not create its window within 30 seconds' }
+          Write-Host 'Win32 app reported the expected version and opened its Sciter window.'
+        }
+        finally { if (-not $gui.HasExited) { Stop-Process -Id $gui.Id -Force } }
     - name: Build Linux packages in the shared Docker environment
       if: inputs.platform == 'linux'
       shell: bash
