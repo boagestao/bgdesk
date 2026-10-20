@@ -16,6 +16,16 @@ SCITER_SHA256 = '285f3e6a051a7c61845cd7e4d2120781b6bdf411239f70a85c65b38a52d38f2
 TARGET = 'i686-pc-windows-msvc'
 
 
+def check_native_dependencies(vcpkg_root):
+    prefix = Path(vcpkg_root) / 'installed/x86-windows-static'
+    required = ('include/libavutil/attributes.h', 'include/libavutil/opt.h',
+                'include/libavcodec/avcodec.h', 'lib/avutil.lib', 'lib/avcodec.lib')
+    missing = [name for name in required if not (prefix / name).is_file()]
+    if missing:
+        raise ValueError('FFmpeg target dependencies missing from x86-windows-static '
+                         '(host x64 libraries cannot build Win32): ' + ', '.join(missing))
+
+
 def require_x86(path):
     data = path.read_bytes()
     if len(data) < 64 or data[:2] != b'MZ':
@@ -67,6 +77,7 @@ def main():
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Win32 compilation requires a Windows MSVC runner')
+    check_native_dependencies(os.environ['VCPKG_ROOT'])
     prepare_sciter(ROOT)
     subprocess.run(['python', 'res/inline-sciter.py'], cwd=ROOT, check=True,
                    env=dict(os.environ, PYTHONUTF8='1'))

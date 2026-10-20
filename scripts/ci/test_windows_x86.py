@@ -40,6 +40,23 @@ class WindowsX86Tests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def test_host_ffmpeg_does_not_satisfy_the_win32_target_dependencies(self):
+        required = ('include/libavutil/attributes.h', 'include/libavutil/opt.h',
+                    'include/libavcodec/avcodec.h', 'lib/avutil.lib', 'lib/avcodec.lib')
+        def install(arch):
+            for name in required:
+                path = self.root / f'installed/{arch}-windows-static' / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture')
+        install('x64')
+        with self.assertRaisesRegex(ValueError, 'host x64 libraries cannot build Win32'):
+            win32.check_native_dependencies(self.root)
+        install('x86')
+        win32.check_native_dependencies(self.root)
+        (self.root / 'installed/x86-windows-static/lib/avcodec.lib').unlink()
+        with self.assertRaisesRegex(ValueError, 'avcodec.lib'):
+            win32.check_native_dependencies(self.root)
+
     def test_runtime_and_packer_cannot_accidentally_contain_x64_or_truncated_binaries(self):
         path = self.root / 'app.exe'
         path.write_bytes(pe())
