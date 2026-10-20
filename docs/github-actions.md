@@ -44,6 +44,9 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   deep links são preservados. O patch é idempotente e recusa alterações inesperadas
   no método legado. As dependências vcpkg/Gradle são salvas em cache mesmo se uma
   etapa posterior de empacotamento falhar; chaves e `key.properties` ficam fora dele.
+  O Gradle usa heap de 4 GiB e até dois workers, com Kotlin no mesmo processo.
+  Jetifier fica desativado: o app e os plugins Android já usam AndroidX. Isso evita
+  transformar os grandes JARs nativos do engine, que esgotavam o heap de 2 GiB.
 
 O Rust está fixado em `1.98.0`, usado na validação local. Mac, Windows e Android leem o pin
 de `scripts/flutter-stable-version`. Os geradores do bridge usam um SDK de
