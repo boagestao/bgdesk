@@ -13,6 +13,7 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
+USER_AGENT = "BGDesk-Release/1.0 (+https://bgdesk.com)"
 
 
 def client():
@@ -93,7 +94,7 @@ def read_records(artifacts, version):
 
 def public_check(origin, key, path, small=False):
     request = urllib.request.Request(f"{origin}/{key}", method="GET" if small else "HEAD",
-                                     headers={"Cache-Control": "no-cache"})
+                                     headers={"Cache-Control": "no-cache", "User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=60) as response:
         if small:
             if response.read(path.stat().st_size + 1) != path.read_bytes():
@@ -144,6 +145,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--artifacts", type=Path, default=Path("artifacts"))
+    parser.add_argument("--source-commit", help="exact commit whose successful builds produced the artifacts")
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
@@ -159,11 +161,22 @@ def main():
             handle.write(f"new_release={str(not published).lower()}\n")
         print("Version already published; builds will run without announcing it again." if published else "New version: release will be published after all builds pass.")
         return
-    if published:
-        print("Version already published; not overwriting its signed artifacts.")
-        return
     records = read_records(args.artifacts, args.version)
-    published_at = subprocess.check_output(["git", "show", "-s", "--format=%cI", "HEAD"], cwd=ROOT, text=True).strip()
+    source_commit = args.source_commit or subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("An exact source commit is required")
+    if published:
+        # A publication-only retry must never attach freshly rebuilt/different
+        # bytes to an already announced version, even from the same source commit.
+        for record, path in records:
+            key = f"updates/{record['edition']}/{release_id}/{record['file_name']}"
+            remote = head(s3, bucket, key)
+            if not remote or remote['ContentLength'] != path.stat().st_size or remote.get('Metadata', {}).get('sha256') != record['sha256']:
+                raise ValueError(f"Published release differs from supplied artifacts: {key}")
+        print("Version already published; all supplied artifacts match its immutable objects.")
+        return
+    published_at = subprocess.check_output(["git", "show", "-s", "--format=%cI", source_commit], cwd=ROOT, text=True).strip()
     with tempfile.TemporaryDirectory(prefix="bgdesk-release-", dir=os.environ.get("RUNNER_TEMP")) as temp:
         private_key = Path(temp) / "signing.json"
         private_key.touch(mode=0o600)
@@ -181,7 +194,7 @@ def main():
             subprocess.run(command, cwd=ROOT, env=environment, check=True)
         publish(s3, bucket, site, records, origin, release_id)
         completion = Path(temp) / "release.json"
-        completion.write_text(json.dumps({"version": args.version, "commit": os.environ.get("GITHUB_SHA")}))
+        completion.write_text(json.dumps({"version": args.version, "commit": source_commit}))
         upload(s3, bucket, completion, marker)
     print(f"BGDesk {args.version} published and verified at {origin}")
 

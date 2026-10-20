@@ -263,3 +263,23 @@ descartável do GitHub, que executa com privilégios administrativos. O store
 `CurrentUser/Root` abre uma confirmação CryptoAPI e falha em sessão sem interface
 com `UI is not allowed in this operation`. Os limites de tempo e a verificação
 de assinatura/timestamp continuam obrigatórios.
+
+## Retomar somente a publicação
+
+Se os cinco builds passaram e apenas `publish` falhou, use **BGDesk - Publish
+existing packages** (`publish-existing.yml`) e informe `source_run`. O workflow
+confere que o run de origem é da `main`, deste repositório, que encerrou e que
+todos os cinco builds, preflight e bridge passaram. Baixa os dez conjuntos de
+artefatos e exige os mesmos 22 arquivos, com hashes e tamanhos válidos. Não instala
+Rust, Flutter ou vcpkg nem recompila.
+
+As ferramentas corrigidas de publicação vêm da `main`; versão, commit e data dos
+binários continuam sendo os do run de origem. Assim uma tentativa posterior gera
+os mesmos manifestos assinados e reaproveita objetos imutáveis já enviados ao R2.
+Uma versão já anunciada só é aceita se os pacotes fornecidos forem idênticos aos
+objetos existentes. A release estável aponta para o commit que produziu os builds.
+
+A verificação pública se identifica como `BGDesk-Release/1.0` no `User-Agent`.
+Isso evita a recusa do identificador padrão Python pelo Browser Integrity Check
+(Cloudflare 1010). As verificações de HTTPS, conteúdo, tamanho e assinatura são
+mantidas; respostas 403 continuam sendo falhas de publicação.

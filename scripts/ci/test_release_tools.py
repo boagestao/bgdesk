@@ -13,6 +13,8 @@ import gzip
 import tarfile
 import re
 import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 
 import config_archive
 
@@ -110,6 +112,81 @@ class ReleaseToolsTests(unittest.TestCase):
         path.write_bytes(b"different release")
         with self.assertRaisesRegex(ValueError, "Immutable"):
             r2.upload(s3, "bucket", path, "updates/v1/app.dmg")
+
+    def test_public_verification_identifies_bgdesk_and_checks_actual_bytes_and_sizes(self):
+        payload = b'public package'
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                self.respond(True)
+            def do_HEAD(self):
+                self.respond(False)
+            def respond(self, body):
+                # Reproduce the origin's rejection of urllib's default identity.
+                allowed = self.headers.get('User-Agent', '').startswith('BGDesk-Release/')
+                self.send_response(200 if allowed else 403)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                if body:
+                    self.wfile.write(payload)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        path = self.root / 'package'
+        path.write_bytes(payload)
+        origin = f'http://127.0.0.1:{server.server_port}'
+        try:
+            r2.public_check(origin, 'package', path, small=True)
+            r2.public_check(origin, 'package', path)
+            path.write_bytes(b'tampered bytes')
+            with self.assertRaisesRegex(ValueError, 'original bytes'):
+                r2.public_check(origin, 'package', path, small=True)
+            path.write_bytes(b'wrong size')
+            with self.assertRaisesRegex(ValueError, 'wrong size'):
+                r2.public_check(origin, 'package', path)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_publication_retry_keeps_the_build_commit_and_original_timestamp(self):
+        s3 = FakeS3()
+        source_commit = 'a' * 40
+        stamp = '2026-10-20T01:02:03-03:00'
+        environment = dict(R2_PUBLIC_ORIGIN='https://download.bgdesk.com', R2_BUCKET='bucket',
+                           BGDESK_UPDATE_SIGNING_KEY='test-key', GITHUB_SHA='b' * 40)
+        with patch.dict(os.environ, environment), \
+             patch('sys.argv', ['publish', '--version', '1.5.2', '--source-commit', source_commit]), \
+             patch.object(r2, 'client', return_value=s3), patch.object(r2, 'read_records', return_value=[]), \
+             patch.object(r2.subprocess, 'check_output', return_value=stamp) as git, \
+             patch.object(r2.subprocess, 'run') as prepare, patch.object(r2, 'publish'):
+            r2.main()
+        self.assertEqual(git.call_args.args[0][-1], source_commit)
+        for call in prepare.call_args_list:
+            command = call.args[0]
+            self.assertEqual(command[command.index('--published-at') + 1], stamp)
+        marker = json.loads(s3.objects['updates/releases/v1.5.2.json']['body'])
+        self.assertEqual(marker['commit'], source_commit)
+
+    def test_already_published_retry_requires_identical_immutable_packages(self):
+        s3 = FakeS3()
+        path = self.root / 'app.dmg'
+        path.write_bytes(b'original')
+        marker = self.root / 'marker.json'
+        marker.write_text('{}')
+        r2.upload(s3, 'bucket', marker, 'updates/releases/v1.5.2.json')
+        r2.upload(s3, 'bucket', path, 'updates/cliente/v1.5.2/app.dmg')
+        record = dict(edition='cliente', file_name='app.dmg', sha256=r2.file_hash(path))
+        with patch.dict(os.environ, {'R2_PUBLIC_ORIGIN': 'https://download.bgdesk.com', 'R2_BUCKET': 'bucket'}), \
+             patch('sys.argv', ['publish', '--version', '1.5.2', '--source-commit', 'a' * 40]), \
+             patch.object(r2, 'client', return_value=s3), patch.object(r2, 'read_records', return_value=[(record, path)]):
+            r2.main()
+            path.write_bytes(b'changed!')
+            record['sha256'] = r2.file_hash(path)
+            with self.assertRaisesRegex(ValueError, 'Published release differs'):
+                r2.main()
+        self.assertEqual(len(s3.writes), 2)
 
     def test_complete_artifact_matrix_and_hashes_are_required(self):
         entries = [dict(target, edition=edition)
