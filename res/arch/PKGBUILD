@@ -1,0 +1,32 @@
+# Packages the already compiled Flutter bundle; no compiler is invoked here.
+pkgname="bgdesk-${BGDESK_EDITION:?Set BGDESK_EDITION to cliente or suporte}"
+pkgver="${BGDESK_VERSION:?Set BGDESK_VERSION}"
+pkgrel=1
+pkgdesc="BGDesk remote desktop (${BGDESK_EDITION}) with unattended service"
+arch=('x86_64')
+url='https://bgdesk.com'
+license=('AGPL-3.0-or-later')
+depends=('gtk3' 'xdotool' 'libxcb' 'libxfixes' 'alsa-lib' 'libva'
+         'libayatana-appindicator' 'gst-plugins-base' 'gst-plugin-pipewire'
+         'libpulse' 'openssl' 'pam' 'systemd' 'procps-ng')
+provides=('bgdesk')
+# Both editions use the same executable, desktop files and system service.
+conflicts=('bgdesk' 'bgdesk-cliente' 'bgdesk-suporte')
+options=('!strip' '!debug' '!lto')
+install=bgdesk.install
+backup=('etc/pam.d/bgdesk' 'etc/bgdesk/startwm.sh')
+
+package() {
+  install -d "$pkgdir/usr/share/bgdesk" "$pkgdir/usr/bin"
+  cp -a "$startdir/bundle/." "$pkgdir/usr/share/bgdesk/"
+  ln -s /usr/share/bgdesk/bgdesk "$pkgdir/usr/bin/bgdesk"
+  install -Dm644 "$startdir/bgdesk.service" "$pkgdir/usr/lib/systemd/system/bgdesk.service"
+  sed -i 's|ExecStop=pkill |ExecStop=/usr/bin/pkill |' "$pkgdir/usr/lib/systemd/system/bgdesk.service"
+  for desktop in bgdesk.desktop bgdesk-link.desktop; do
+    install -Dm644 "$startdir/$desktop" "$pkgdir/usr/share/applications/$desktop"
+  done
+  install -Dm644 "$startdir/128x128@2x.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/bgdesk.png"
+  install -Dm644 "$startdir/scalable.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/bgdesk.svg"
+  install -Dm644 "$startdir/bgdesk.pam" "$pkgdir/etc/pam.d/bgdesk"
+  install -Dm755 "$startdir/startwm.sh" "$pkgdir/etc/bgdesk/startwm.sh"
+}

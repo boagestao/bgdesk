@@ -103,6 +103,24 @@ class WebsiteReleaseTests(unittest.TestCase):
         data = json.loads((self.public / "updates/suporte/v1.5.2/bgdesk-update.json").read_text())
         self.assertEqual({item["format"] for item in data["artifacts"]}, {"exe", "msi", "dmg"})
 
+    def test_arch_compound_extension_is_signed_and_wrong_extension_rejected(self):
+        package = self.root / 'bgdesk-suporte-x86_64.pkg.tar.zst'
+        package.write_bytes(b'Arch package')
+        self.prepare(extra=('--artifact', 'linux', 'x86_64', 'pkg.tar.zst', str(package)))
+        release = self.public / 'updates/suporte/v1.5.2'
+        manifest = json.loads((release / 'bgdesk-update.json').read_text())
+        self.assertIn('pkg.tar.zst', {item['format'] for item in manifest['artifacts']})
+        website.load_key(self.key)
+        metadata.command_verify(argparse.Namespace(
+            metadata=release / 'bgdesk-update.json', signature=release / 'bgdesk-update.json.sig',
+            artifact=[str(release / self.artifact.name), str(release / package.name)],
+            version='1.5.2', release_id='v1.5.2', package_id='bgdesk-suporte',
+            release_base_url=f'{website.ORIGIN}/updates/suporte'))
+        wrong = self.root / 'bgdesk.zst'
+        wrong.write_bytes(b'not a .pkg.tar.zst')
+        self.prepare('cliente', extra=('--artifact', 'linux', 'x86_64', 'pkg.tar.zst', str(wrong)), success=False)
+        self.prepare('cliente', extra=('--artifact', 'linux', 'aarch64', 'pkg.tar.zst', str(package)), success=False)
+
 
 if __name__ == "__main__":
     unittest.main()

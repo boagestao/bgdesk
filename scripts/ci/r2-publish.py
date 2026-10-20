@@ -82,7 +82,7 @@ def read_records(artifacts, version):
         for platform, arch, formats in (
             ("macos", "aarch64", ("dmg",)), ("macos", "x86_64", ("dmg",)),
             ("windows", "x86_64", ("exe", "inno-exe")),
-            ("linux", "x86_64", ("deb", "rpm", "AppImage")),
+            ("linux", "x86_64", ("deb", "rpm", "AppImage", "pkg.tar.zst")),
             ("linux", "aarch64", ("deb", "rpm", "AppImage")),
         ) for fmt in formats
     }

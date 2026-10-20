@@ -123,12 +123,12 @@ def prepare_release(args):
             ) or (
                 platform == "linux" and arch in {"x86_64", "aarch64"}
                 and file_format in {"deb", "rpm", "AppImage"}
-            )
+            ) or (platform == "linux" and arch == "x86_64" and file_format == "pkg.tar.zst")
             if not valid_selector:
                 metadata.fail("unsupported auto-update selector; use macos/aarch64|x86_64/dmg or windows/x86|x86_64|aarch64/exe|msi")
             path = Path(raw_path).resolve()
             extension = "exe" if file_format == "inno-exe" else file_format
-            if path.suffix != f".{extension}":
+            if not path.name.endswith(f".{extension}"):
                 metadata.fail("artifact extension does not match its format")
             metadata.validate_or_fail(metadata.validate_artifact_file_name, path.name)
             if path.name in {"bgdesk-update.json", "bgdesk-update.json.sig", "index.html"}:

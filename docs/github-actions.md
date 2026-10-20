@@ -6,7 +6,7 @@ manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
 O build Apple Silicon já passou. A matriz volta a ter as cinco máquinas, e a
-publicação continua exigindo os vinte arquivos das duas edições. Um conjunto
+publicação continua exigindo os 22 arquivos das duas edições. Um conjunto
 incompleto não substitui o `latest.json`.
 
 O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
@@ -24,6 +24,8 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   que aceita `--update`. Ambos recebem assinatura Authenticode; o aplicativo
   interno também é assinado antes de empacotar.
 - Linux x64 e ARM64: `.deb`, `.rpm` e AppImage, pelas imagens Docker do projeto.
+  O x64 também gera `.pkg.tar.zst` para Arch Linux e derivados, reaproveitando
+  o bundle já compilado, sem outra compilação ou runner.
   ARM64 continua usando o Flutter eLinux 3.29.3 compatível com esse ambiente.
 
 O Rust está fixado em `1.98.0`, usado na validação local. Mac e Windows leem o pin
@@ -35,7 +37,7 @@ plataforma e arquitetura. As duas edições compartilham downloads e dependênci
 compiladas do Cargo; no Linux também usam a mesma imagem e os mesmos volumes
 Docker. Os artefatos de cada edição são guardados separadamente antes de iniciar
 a próxima, sem apagar o cache de compilação entre elas. A publicação continua
-exigindo os vinte arquivos das duas edições em todas as plataformas.
+exigindo os 22 arquivos das duas edições em todas as plataformas.
 
 No macOS, cada edição guarda um checkpoint fora do diretório temporário do DMG:
 `app.tar` do app compilado (links simbólicos e permissões preservados), o DMG
@@ -150,7 +152,7 @@ releases. Mudar de domínio exige manter os canais anteriores acessíveis.
 1. Atualize a versão em `Cargo.toml`, `flutter/pubspec.yaml` (preservando ou
    aumentando o número após `+`) e `libs/portable/Cargo.toml`.
 2. Faça push na `main`. Todos os builds precisam terminar com sucesso.
-3. O job de publicação confere os vinte artefatos esperados, seus tamanhos e
+3. O job de publicação confere os 22 artefatos esperados, seus tamanhos e
    hashes. O manifesto seleciona o pacote Windows nativo para atualização;
    o Inno Setup fica identificado como `inno-exe`, para download inicial.
 4. Assina os manifestos das duas edições com a chave de update, envia as pastas
@@ -202,3 +204,26 @@ Referências: [certificados no GitHub Actions](https://docs.github.com/en/action
 [runners disponíveis](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
 [tokens do R2](https://developers.cloudflare.com/r2/api/tokens/),
 [domínios públicos do R2](https://developers.cloudflare.com/r2/buckets/public-buckets/).
+
+## Arch Linux x86_64
+
+Os pacotes `bgdesk-cliente` e `bgdesk-suporte` são alternativas que usam os mesmos
+caminhos; instale somente uma edição. O runner Linux x64 usa `makepkg` numa imagem
+Arch fixada por digest para empacotar o bundle existente. O pacote declara suas
+dependências e inclui a unidade `/usr/lib/systemd/system/bgdesk.service`.
+
+```sh
+sudo pacman -U ./bgdesk-cliente-x86_64.pkg.tar.zst
+systemctl status bgdesk.service
+```
+
+A instalação habilita o serviço no boot e o inicia para acesso unattended.
+Em instalação offline, ele inicia no próximo boot. Atualizações reiniciam somente
+um serviço que já estava ativo; remoção para e desabilita o serviço. Configuração,
+senhas e regras de autenticação existentes são preservadas. O serviço não define
+uma senha automaticamente: configure a autenticação de acesso no aplicativo.
+
+Os downloads estáveis são `https://download.bgdesk.com/bgdesk-cliente-x86_64.pkg.tar.zst`
+e `https://download.bgdesk.com/bgdesk-suporte-x86_64.pkg.tar.zst`. Ambos entram no
+manifesto assinado e na verificação de completude dos 22 arquivos antes de ativar
+os feeds. Arch Linux ARM não está incluído neste pacote x86_64.

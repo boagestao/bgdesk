@@ -127,7 +127,7 @@ class ReleaseToolsTests(unittest.TestCase):
                                     format=fmt, version="1.5.2", file_name=name, size=10,
                                     sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
             (directory / "artifacts.json").write_text(json.dumps(records))
-        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 20)
+        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 22)
         chosen = next(self.root.glob("*/artifacts.json"))
         saved = chosen.read_bytes()
         chosen.unlink()
@@ -224,7 +224,7 @@ class ReleaseToolsTests(unittest.TestCase):
                     str(artifacts / f'build-{platform}-{arch}-{edition}'),
                 ], cwd=self.root, check=True)
         records = r2.read_records(artifacts, '1.5.2')
-        self.assertEqual(len(records), 20)
+        self.assertEqual(len(records), 22)
         for record, path in records:
             self.assertEqual(path.read_bytes(),
                              f"{record['platform']}/{record['arch']}/{record['edition']}/{record['format']}".encode())

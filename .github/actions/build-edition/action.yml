@@ -81,6 +81,12 @@ runs:
         args=("linux-$ARCH")
         [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente "linux-$ARCH")
         bash build.sh "${args[@]}"
+    - name: Package the existing Linux x64 bundle for Arch
+      if: inputs.platform == 'linux' && inputs.arch == 'x86_64'
+      shell: bash
+      env:
+        EDITION: ${{ inputs.edition }}
+      run: bash scripts/package-arch-linux.sh "$EDITION"
     - name: Collect and validate expected artifacts
       shell: bash
       env:

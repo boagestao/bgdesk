@@ -1,0 +1,31 @@
+# pacman sources this file and invokes these callbacks. Configuration and
+# unattended-access credentials belong to the user and are never removed.
+post_install() {
+  # Enabling also works in an offline installation/chroot.
+  systemctl enable bgdesk.service
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl start bgdesk.service
+  fi
+}
+
+post_upgrade() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    # Preserve a service the administrator deliberately stopped or disabled.
+    systemctl try-restart bgdesk.service
+  fi
+}
+
+pre_remove() {
+  if [ -d /run/systemd/system ]; then
+    systemctl stop bgdesk.service
+  fi
+  systemctl disable bgdesk.service
+}
+
+post_remove() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+  fi
+}

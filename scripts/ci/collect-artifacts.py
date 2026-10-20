@@ -16,7 +16,8 @@ def specs(platform, arch, edition):
         return [("exe", directory / f"bgdesk-{edition}-update-win64.exe"),
                 ("inno-exe", directory / f"bgdesk-{edition}-win64.exe")]
     directory = Path(f"build/linux-{arch}-{edition}")
-    return [(fmt, directory / f"bgdesk-{edition}-{arch}.{fmt}") for fmt in ("deb", "rpm", "AppImage")]
+    formats = ("deb", "rpm", "AppImage") + (("pkg.tar.zst",) if arch == "x86_64" else ())
+    return [(fmt, directory / f"bgdesk-{edition}-{arch}.{fmt}") for fmt in formats]
 
 
 def main():
