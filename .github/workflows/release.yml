@@ -114,7 +114,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake curl git libclang-dev llvm pkg-config unzip xz-utils
-          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_VERSION" --profile minimal
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_VERSION" --profile minimal --component rustfmt
           source "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           cargo install cargo-expand --version 1.0.95 --locked
