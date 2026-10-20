@@ -69,6 +69,17 @@ clean_for_force_rebuild() {
 }
 
 ensure_bridge() {
+  if [[ "${BGDESK_REQUIRE_BRIDGE:-}" == "1" ]]; then
+    if [[ ! -f flutter/lib/generated_bridge.dart \
+        || ! -f flutter/lib/generated_bridge.freezed.dart \
+        || ! -f src/bridge_generated.rs \
+        || ! -f src/bridge_generated.io.rs ]]; then
+      log "ERRO: bridge compartilhado ausente. O job de bridge deveria ter publicado o artefato."
+      exit 1
+    fi
+    log "usando bridge compartilhado — sem regenerar"
+    return
+  fi
   if [[ "${BUILD_BRIDGES}" != "1" \
       && -f flutter/lib/generated_bridge.dart \
       && -f flutter/lib/generated_bridge.freezed.dart \

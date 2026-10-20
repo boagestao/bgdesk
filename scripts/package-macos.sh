@@ -262,6 +262,45 @@ stapler_with_retry() {
   done
 }
 
+# GitHub-hosted macOS runners drop CFNetwork connections to
+# api.apple-cloudkit.com (NSURLError -1005, stapler 68) on every attempt.
+# Repeating stapler does not change that path.
+prefer_ipv4_for_cloudkit() {
+  [[ "${GITHUB_ACTIONS:-}" == "true" ]] || return 0
+  echo "[macOS] Desligando IPv6: neste runner o stapler perde a conexão com o CloudKit." >&2
+  local service
+  while IFS= read -r service; do
+    case "$service" in
+      ""|"An asterisk"*|\**) continue ;;
+    esac
+    sudo -n networksetup -setv6off "$service" || true
+  done < <(networksetup -listallnetworkservices | tail -n +2)
+}
+
+BGDESK_STAPLED_WITH_RCODESIGN=0
+staple_ticket() {
+  local image="$1" status
+  prefer_ipv4_for_cloudkit
+  if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    stapler_with_retry staple "$image"
+    return
+  fi
+  if xcrun stapler staple "$image"; then
+    return 0
+  else
+    status=$?
+  fi
+  if [[ "$status" != 68 ]]; then
+    return "$status"
+  fi
+  echo "[macOS] stapler não alcança o CloudKit (68). A notarização já foi Accepted; buscando o ticket com rcodesign." >&2
+  if ! command -v rcodesign >/dev/null 2>&1; then
+    HOMEBREW_NO_AUTO_UPDATE=1 brew install rcodesign
+  fi
+  rcodesign staple "$image"
+  BGDESK_STAPLED_WITH_RCODESIGN=1
+}
+
 bash "$ROOT/.github/scripts/sign-macos-app.sh" "$app_path" "$identity" \
   "$ROOT/flutter/macos/Runner/Release.entitlements"
 verify_signature "$app_path"
@@ -299,8 +338,14 @@ if [[ "$local_build" == "0" ]]; then
     xcrun notarytool log "$submission_id" "${notary_args[@]}" "$log_path" || true
     fail "Notarização $status ($submission_id). Consulte $result_path e $log_path."
   fi
-  stapler_with_retry staple "$work_dir/final.dmg"
-  stapler_with_retry validate "$work_dir/final.dmg"
+  staple_ticket "$work_dir/final.dmg"
+  if ! stapler_with_retry validate "$work_dir/final.dmg"; then
+    status=$?
+    if [[ "$status" != 68 || "$BGDESK_STAPLED_WITH_RCODESIGN" != 1 ]]; then
+      exit "$status"
+    fi
+    echo "[macOS] stapler validate também não alcança o CloudKit. O ticket foi anexado; Gatekeeper confirma em seguida." >&2
+  fi
   verify_signature "$work_dir/final.dmg"
   spctl --assess --type open --context context:primary-signature --verbose=4 "$work_dir/final.dmg"
 fi

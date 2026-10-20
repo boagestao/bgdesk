@@ -42,6 +42,7 @@ echo "[docker-build-linux-aarch64] running compile inside container (FORCE_REBUI
 docker run --platform linux/arm64 --rm \
   -e FORCE_REBUILD="${FORCE_REBUILD}" \
   -e BUILD_BRIDGES="${BUILD_BRIDGES}" \
+  -e BGDESK_REQUIRE_BRIDGE="${BGDESK_REQUIRE_BRIDGE:-0}" \
   -e BGDESK_CLIENTE="${BGDESK_CLIENTE}" \
   -e BGDESK_BUILD_OUT_DIR="${BGDESK_BUILD_OUT_DIR}" \
   -e CARGO_INCREMENTAL=1 \

@@ -86,12 +86,14 @@ DMG com Developer ID Application e timestamp seguro, envia essa imagem à Apple,
 exige status `Accepted` e anexa o ticket ao DMG (`stapler`). A notarização do
 contêiner também abrange o app dentro dele.
 
-Depois do status `Accepted`, as operações `stapler staple` e `validate` repetem
-erros 68 de comunicação com o serviço Apple até cinco vezes, com intervalos de
-5, 10, 20 e 40 segundos. A repetição usa o mesmo DMG já aprovado, sem reenviar
-a notarização. Se o serviço continuar falhando, o empacotamento para e preserva
-o arquivo de saída anterior. Erros de ticket inválido/revogado ou de gravação
-em disco encerram a operação imediatamente.
+Depois do status `Accepted`, fora do GitHub Actions, `stapler staple` e
+`validate` repetem erros 68 até cinco vezes, com intervalos de 5, 10, 20 e 40
+segundos, sem reenviar a notarização. No runner do GitHub essa repetição não
+resolve: a conexão com `api.apple-cloudkit.com` cai em todas as tentativas
+(`NSURLError -1005`). O script desliga o IPv6 e, se o `stapler` ainda sair com
+68, busca o mesmo ticket com `rcodesign`, que não usa o CFNetwork. Erros de
+ticket inválido/revogado ou de gravação em disco encerram na hora e preservam
+o arquivo de saída anterior.
 
 O script verifica a assinatura, o ticket e o Gatekeeper da imagem final, monta
 o DMG somente para leitura e valida a assinatura e o Gatekeeper do app incluído.

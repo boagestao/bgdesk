@@ -35,7 +35,7 @@ class MacOSPackagingTests(unittest.TestCase):
         )
         for key in ("MACOS_P12_FILE", "MACOS_P12_PASSWORD",
                     "MACOS_NOTARY_APPLE_ID", "MACOS_NOTARY_PASSWORD",
-                    "MACOS_CODESIGN_KEYCHAIN"):
+                    "MACOS_CODESIGN_KEYCHAIN", "GITHUB_ACTIONS"):
             self.env.pop(key, None)
         self.bin = self.base / "bin"
         self.bin.mkdir()
@@ -320,6 +320,36 @@ exit "$TEST_GATEKEEPER_EXIT"
         self.assertEqual(events.count('stapler staple'), 1)
         self.assertNotIn('gatekeeper', events)
         self.assertFalse((self.base / 'events.sleeps').exists())
+
+    def test_github_runner_fetches_ticket_without_repeating_stapler(self):
+        env, app, archive = self.mock_distribution_services()
+        env.update(GITHUB_ACTIONS='true', TEST_STAPLE_FAILURES='99')
+        self.fake_tool('networksetup', '''
+echo "networksetup $*" >>"$TEST_EVENTS"
+if [[ "$1" == "-listallnetworkservices" ]]; then
+  printf '%s\n' 'An asterisk (*) denotes that a network service is disabled.' 'Ethernet'
+fi
+''')
+        self.fake_tool('sudo', '''
+echo "sudo $*" >>"$TEST_EVENTS"
+if [[ "$1" == "-n" ]]; then shift; fi
+"$@"
+''')
+        self.fake_tool('rcodesign', '''
+echo "rcodesign $*" >>"$TEST_EVENTS"
+if [[ "$1" == staple ]]; then
+  xattr -w com.bgdesk.test-notary-ticket accepted "$2"
+fi
+''')
+        self.run_command(["bash", PACKAGE, app, archive], env=env)
+        events = (self.base / 'events').read_text().splitlines()
+        self.assertEqual(events.count('notarytool submit'), 1)
+        self.assertEqual(events.count('stapler staple'), 1)
+        self.assertIn('networksetup -setv6off Ethernet', events)
+        self.assertTrue(any(event.startswith('rcodesign staple ') for event in events))
+        self.assertIn('stapler validate', events)
+        ticket = self.run_command(['xattr', '-p', 'com.bgdesk.test-notary-ticket', archive])
+        self.assertEqual(ticket.stdout.strip(), 'accepted')
 
     def test_installers_reject_invalid_image_before_installing(self):
         env = self.fake_tool("curl", '''

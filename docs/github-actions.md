@@ -10,6 +10,12 @@ macOS Intel ficam fora da matriz. Nesse estado o push na `main` só dispara
 `macos / aarch64` e não publica, para um conjunto incompleto não substituir o
 `latest.json`. A publicação continua exigindo os vinte arquivos das duas edições.
 
+O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
+O resultado fica em cache, pela hash de `src/flutter_ffi.rs`, do pubspec e do
+gerador, e também como artefato `flutter-bridge`. Cada plataforma baixa esse
+artefato e recusa recompilar se ele não estiver presente. Os arquivos gerados
+são os mesmos para macOS, Windows e Linux.
+
 São cinco jobs paralelos, em máquinas nativas do GitHub, quando a matriz completa
 está ligada. Cada job prepara o ambiente uma vez e compila primeiro o cliente,
 depois o suporte, na mesma máquina:

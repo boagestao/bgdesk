@@ -294,6 +294,17 @@ generate_bridge() {
 }
 
 ensure_bridge() {
+  if [[ "${BGDESK_REQUIRE_BRIDGE:-}" == "1" ]]; then
+    if ! bridge_exists || [[ ! -f src/bridge_generated.io.rs ]]; then
+      echo "[build] ERRO: bridge compartilhado ausente. O job de bridge deveria ter publicado o artefato." >&2
+      exit 1
+    fi
+    echo "[build] usando bridge compartilhado — sem regenerar"
+    pushd flutter >/dev/null
+    flutter pub get
+    popd >/dev/null
+    return
+  fi
   if [[ "${BUILD_BRIDGES}" != "1" ]] && bridge_exists; then
     echo "[build] bridge já existe — pulando geração (use --build-bridges para recriar)"
     pushd flutter >/dev/null

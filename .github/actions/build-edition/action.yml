@@ -34,9 +34,9 @@ runs:
       if: inputs.platform == 'windows'
       shell: bash
       run: |
-        # Generate bindings for the first edition and reuse them for the second.
+        # The shared bridge artifact is already in the workspace.
         args=(windows)
-        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente windows --build-bridges)
+        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente windows)
         bash build.sh "${args[@]}"
     - name: Sign Windows app
       if: inputs.platform == 'windows'
