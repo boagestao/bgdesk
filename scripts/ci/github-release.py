@@ -158,6 +158,12 @@ def main():
             reconcile_stable(args.repo, args.version, records)
             return
         tag = f'v{args.version}'
+        published = release(args.repo, tag)
+        # GitHub state is independent of R2's completion marker. Adding Android
+        # may be the first R2 publication of an existing stable GitHub version.
+        if published and not published.get('draft') and not published.get('prerelease'):
+            reconcile_stable(args.repo, args.version, records)
+            return
         existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {args.version}',
                                   'Todas as plataformas validadas e publicação R2 concluída.', draft=True)
         public_files = [path for record, path in records if is_public_package(record)]

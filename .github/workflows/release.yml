@@ -433,9 +433,4 @@ jobs:
       - name: Publish or complete stable GitHub Release, including both Windows editions
         env:
           GH_TOKEN: ${{ github.token }}
-          NEW_RELEASE: ${{ needs.preflight.outputs.new_release }}
-        shell: bash
-        run: |
-          args=(--stable --version '${{ needs.preflight.outputs.version }}')
-          [[ "$NEW_RELEASE" == true ]] || args+=(--reconcile-existing)
-          python scripts/ci/github-release.py "${args[@]}"
+        run: python scripts/ci/github-release.py --stable --version '${{ needs.preflight.outputs.version }}'

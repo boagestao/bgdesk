@@ -137,13 +137,26 @@ class GitHubReleaseTests(unittest.TestCase):
         with patch('sys.argv', ['release', '--stable', '--version', '1.5.2', '--artifacts', str(self.root),
                                 '--commit', 'a' * 40]), \
              patch.object(release, 'ensure_release', return_value={'assets': []}), \
-             patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'):
+             patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'), patch.object(release, 'release', return_value=None):
             release.main()
         files = upload.call_args.args[-1]
         self.assertEqual(len(files), 24)
         windows = [p for p in files if '-windows-' in p.name]
         self.assertEqual(len(windows), 4)
         self.assertTrue(all('inno-exe' in p.name for p in windows))
+
+        # Existing stable GitHub releases must preserve their original tag even
+        # when R2's completion marker is absent.
+        with patch('sys.argv', ['release', '--stable', '--version', '1.5.2', '--artifacts', str(self.root),
+                                '--commit', 'a' * 40]), \
+             patch.object(release, 'release', return_value={'draft': False, 'prerelease': False,
+                                                          'target_commitish': 'b' * 40}), \
+             patch.object(release, 'reconcile_stable') as reconcile, \
+             patch.object(release, 'ensure_release') as create:
+            release.main()
+        create.assert_not_called()
+        self.assertEqual(reconcile.call_args.args[:2], ('boagestao/bgdesk', '1.5.2'))
+        self.assertEqual(len(reconcile.call_args.args[2]), 28)
 
     def existing_stable_fixture(self, missing):
         records, assets = [], []

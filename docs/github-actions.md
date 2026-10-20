@@ -47,6 +47,9 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   O Gradle usa heap de 4 GiB e até dois workers, com Kotlin no mesmo processo.
   Jetifier fica desativado: o app e os plugins Android já usam AndroidX. Isso evita
   transformar os grandes JARs nativos do engine, que esgotavam o heap de 2 GiB.
+  A detecção de release estável existente consulta o GitHub diretamente, sem
+  depender do marcador de publicação R2. Assim, incluir Android em uma versão
+  já publicada preserva o tag e os bytes dos instaladores existentes.
 
 O Rust está fixado em `1.98.0`, usado na validação local. Mac, Windows e Android leem o pin
 de `scripts/flutter-stable-version`. Os geradores do bridge usam um SDK de
