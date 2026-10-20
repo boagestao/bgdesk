@@ -2,6 +2,7 @@
 """Build the existing Sciter UI for Win32, without Flutter or bridge generation."""
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -14,6 +15,56 @@ SCITER_REV = '674e07d3066ca9a92ced3816203ab6b652629d1e'
 SCITER_SDK_REV = 'f33df075d9eb2f8d252cb88f1b2c8096e56197ed'
 SCITER_SHA256 = '285f3e6a051a7c61845cd7e4d2120781b6bdf411239f70a85c65b38a52d38f28'
 TARGET = 'i686-pc-windows-msvc'
+
+
+def require_x86_archive(path):
+    """Reject a host x64 static library even if it was copied into a Win32 directory."""
+    data = path.read_bytes()
+    if data[:8] != b'!<arch>\n':
+        raise ValueError('Expected a COFF static library: ' + path.name)
+    offset, objects = 8, 0
+    while offset < len(data):
+        header = data[offset:offset + 60]
+        if len(header) != 60 or header[58:60] != b'`\n':
+            raise ValueError('Invalid COFF archive member')
+        size = int(header[48:58])
+        body = data[offset + 60:offset + 60 + size]
+        if len(body) != size:
+            raise ValueError('Truncated COFF archive member')
+        if header[:16].strip() not in (b'/', b'//', b'/SYM64/'):
+            # Regular COFF objects store Machine at 0; import/bigobj headers at 6.
+            machine_offset = 6 if body[:4] == b'\0\0\xff\xff' else 0
+            if len(body) < machine_offset + 2 or struct.unpack_from('<H', body, machine_offset)[0] != 0x14c:
+                raise ValueError('Static library contains a non-x86 COFF object: ' + path.name)
+            objects += 1
+        offset += 60 + size + size % 2
+    if offset != len(data) or not objects:
+        raise ValueError('Empty or invalid COFF archive')
+    return objects
+
+
+def sodium_config(root):
+    metadata = json.loads(subprocess.check_output(
+        ['cargo', 'metadata', '--locked', '--format-version', '1', '--filter-platform', TARGET],
+        cwd=root, text=True))
+    packages = [p for p in metadata['packages'] if p['name'] == 'libsodium-sys']
+    if len(packages) != 1 or packages[0]['version'] != '0.2.7':
+        raise ValueError('Review the locked libsodium-sys version before building Win32')
+    package = Path(packages[0]['manifest_path']).parent
+    library = package / 'msvc/Win32/Release/v142'
+    objects = require_x86_archive(library / 'libsodium.lib')
+    config = root / '.tools/win32-sodium.toml'
+    config.parent.mkdir(parents=True, exist_ok=True)
+    # This crate's build.rs uses host cfg!(target_pointer_width), choosing x64
+    # while cross-compiling. A Cargo links override is scoped to the target:
+    # host build dependencies keep their own library and build script.
+    values = {'rustc-link-lib': ['static=libsodium'],
+              'rustc-link-search': ['native=' + str(library)],
+              'include': str(package / 'libsodium/src/libsodium/include'), 'lib': str(library)}
+    config.write_text(f'[target.{TARGET}.sodium]\n' + ''.join(
+        f'{key} = {json.dumps(value)}\n' for key, value in values.items()), encoding='utf-8')
+    print(f'Using locked libsodium-sys 0.2.7 Win32 static library ({objects} x86 objects verified)', flush=True)
+    return config
 
 
 def check_native_dependencies(vcpkg_root):
@@ -79,10 +130,11 @@ def main():
         parser.error('Win32 compilation requires a Windows MSVC runner')
     check_native_dependencies(os.environ['VCPKG_ROOT'])
     prepare_sciter(ROOT)
+    sodium = sodium_config(ROOT)
     subprocess.run(['python', 'res/inline-sciter.py'], cwd=ROOT, check=True,
                    env=dict(os.environ, PYTHONUTF8='1'))
     features = 'inline,hwcodec,vram' + (',incoming-only' if args.edition == 'cliente' else '')
-    subprocess.run(['cargo', 'build', '--locked', '--release', '--target', TARGET,
+    subprocess.run(['cargo', 'build', '--config', str(sodium), '--locked', '--release', '--target', TARGET,
                     '--features', features, '--bin', 'rustdesk'], cwd=ROOT, check=True)
     source = ROOT / f'target/{TARGET}/release/rustdesk.exe'
     require_x86(source)

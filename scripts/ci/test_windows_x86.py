@@ -7,6 +7,7 @@ import struct
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -34,11 +35,53 @@ def pe(machine=0x14c, magic=0x10b):
     return data
 
 
+def coff_archive(machine):
+    body = struct.pack('<H', machine) + bytes(18)
+    header = b'object.obj/     ' + b'0           ' + b'0     ' + b'0     ' + b'100644  '
+    header += str(len(body)).encode().ljust(10) + b'`\n'
+    return b'!<arch>\n' + header + body
+
+
 class WindowsX86Tests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+
+    def test_crypto_link_override_is_scoped_to_win32_and_keeps_the_locked_library_version(self):
+        package = self.root / 'registry/libsodium-sys-0.2.7'
+        library = package / 'msvc/Win32/Release/v142/libsodium.lib'
+        library.parent.mkdir(parents=True)
+        library.write_bytes(coff_archive(0x14c))
+        metadata = dict(packages=[dict(name='libsodium-sys', version='0.2.7',
+                                      manifest_path=str(package / 'Cargo.toml'))])
+        with patch.object(win32.subprocess, 'check_output', return_value=json.dumps(metadata)) as cargo:
+            config = win32.sodium_config(self.root)
+        self.assertIn('--locked', cargo.call_args.args[0])
+        self.assertEqual(cargo.call_args.args[0][-1], 'i686-pc-windows-msvc')
+        values = tomllib.loads(config.read_text())
+        self.assertEqual(list(values['target']), ['i686-pc-windows-msvc'])
+        sodium = values['target']['i686-pc-windows-msvc']['sodium']
+        self.assertEqual(sodium['rustc-link-lib'], ['static=libsodium'])
+        self.assertEqual(sodium['rustc-link-search'], ['native=' + str(library.parent)])
+        library.write_bytes(coff_archive(0x8664))
+        with patch.object(win32.subprocess, 'check_output', return_value=json.dumps(metadata)):
+            with self.assertRaisesRegex(ValueError, 'non-x86'):
+                win32.sodium_config(self.root)
+        metadata['packages'][0]['version'] = 'other'
+        with patch.object(win32.subprocess, 'check_output', return_value=json.dumps(metadata)):
+            with self.assertRaisesRegex(ValueError, 'locked libsodium-sys version'):
+                win32.sodium_config(self.root)
+
+    def test_coff_archive_rejects_mixed_architectures_and_corrupt_members(self):
+        path = self.root / 'sodium.lib'
+        path.write_bytes(coff_archive(0x14c))
+        self.assertEqual(win32.require_x86_archive(path), 1)
+        for data in (coff_archive(0x14c) + coff_archive(0x8664)[8:],
+                     coff_archive(0x14c)[:-3], b'!<arch>\n', b'not an archive'):
+            path.write_bytes(data)
+            with self.assertRaises(ValueError):
+                win32.require_x86_archive(path)
 
     def test_host_ffmpeg_does_not_satisfy_the_win32_target_dependencies(self):
         required = ('include/libavutil/attributes.h', 'include/libavutil/opt.h',
