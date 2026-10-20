@@ -199,6 +199,12 @@ class ReleaseToolsTests(unittest.TestCase):
                 self.assertTrue(all(target['platform'] == platform for target in selected))
         self.assertEqual(plan.matrix('all')['include'], targets)
 
+    def test_targeted_validation_allocates_only_one_machine_and_keeps_both_editions(self):
+        for platform, arch, runner in plan.TARGETS:
+            selected = plan.matrix(f'{platform}-{arch}')['include']
+            self.assertEqual(selected, [dict(platform=platform, arch=arch, runner=runner)])
+            self.assertNotIn('edition', selected[0])
+
     def test_serial_editions_keep_independent_artifacts_for_publication(self):
         repository = Path(__file__).resolve().parents[2]
         (self.root / 'Cargo.toml').write_text('[package]\nversion = "1.5.2"\n')

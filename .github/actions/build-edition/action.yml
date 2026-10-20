@@ -101,6 +101,12 @@ runs:
         path: release-artifacts/${{ inputs.edition }}/*
         if-no-files-found: error
         retention-days: 14
+    - name: Publish finished packages to GitHub Releases
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EDITION: ${{ inputs.edition }}
+      run: python scripts/ci/github-release.py --manifest "release-artifacts/$EDITION/artifacts.json"
     - name: Publish macOS packaging checkpoint
       if: always() && inputs.platform == 'macos'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

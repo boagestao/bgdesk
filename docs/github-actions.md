@@ -1,7 +1,10 @@
 # Build e publicação pelo GitHub Actions
 
 O workflow de distribuição é `.github/workflows/release.yml`, **BGDesk - Build and
-publish**. Cada push na `main` compila cliente e suporte. Também pode executar
+publish**. Cada push na `main` compila cliente e suporte do alvo selecionado. A variável
+`BGDESK_RELEASE_TARGET` controla o alvo temporário de validação; ausente ou
+`all`, ativa as cinco plataformas/arquiteturas. Durante a validação individual
+o deploy R2 fica desativado. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
@@ -227,3 +230,30 @@ Os downloads estáveis são `https://download.bgdesk.com/bgdesk-cliente-x86_64.p
 e `https://download.bgdesk.com/bgdesk-suporte-x86_64.pkg.tar.zst`. Ambos entram no
 manifesto assinado e na verificação de completude dos 22 arquivos antes de ativar
 os feeds. Arch Linux ARM não está incluído neste pacote x86_64.
+
+## Validação individual e Releases imediatas
+
+O seletor manual aceita `linux-x86_64`, `linux-aarch64`, `macos-aarch64`,
+`macos-x86_64` e `windows-x86_64`, além dos grupos por sistema e `all`.
+Cada alvo continua compilando cliente e suporte em sequência na mesma máquina.
+A ordem de validação atual é Linux x64, Linux ARM, macOS Intel (que ainda falhou),
+Windows x64 e então `all` com publicação. macOS ARM já passou nas duas edições.
+Win32 será iniciado somente depois do deploy completo das plataformas atuais.
+
+Assim que uma edição termina, seu instalador é salvo como artefato do Actions
+**e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome
+`build-v<versão>-<plataforma>-<arquitetura>-<run>-<tentativa>`. A outra edição
+acrescenta seus arquivos à mesma pré-release quando termina. Os nomes são únicos,
+com manifests e SHA256SUMS separados por edição; hashes e tamanhos são verificados
+antes do envio e arquivos existentes com bytes diferentes nunca são sobrescritos.
+Essas pré-releases ficam visíveis em Releases mesmo se outro alvo falhar. Elas
+não alteram o feed de atualização automática. Após todos os 22 pacotes passarem e
+a publicação R2 terminar, é publicada a release estável `v<versão>` com os arquivos.
+
+A assinatura Windows informa separadamente exportação do certificado, confiança
+na CA temporária, assinatura, timestamp RFC3161 e verificação Authenticode.
+Cada comando tem prazo de 30 ou 120 segundos e recebe stdin fechado; falhas
+informam a fase sem imprimir senhas. O teste de assinatura de um PE temporário
+ocorre antes da compilação, evitando gastar um build inteiro com certificado ou
+serviço de timestamp indisponível. Os binários continuam exigindo assinatura e
+timestamp válidos.

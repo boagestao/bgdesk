@@ -29,8 +29,12 @@ if [[ -d "$frameworks_path" ]]; then
   done < <(find "$frameworks_path" -depth -type d -name '*.framework' -print0)
 fi
 
-# Sign helper executables as well as the main executable before sealing the app.
+# Sign helpers first; signing the app seals its main executable last.
+main_executable=$(plutil -extract CFBundleExecutable raw -o - "$app_path/Contents/Info.plist")
 while IFS= read -r -d '' code; do
+  # codesign treats the main executable as the whole bundle. Seal it only after
+  # all helpers, regardless of find's enumeration order (Intel helpers may be unsigned).
+  [[ "$code" != "$app_path/Contents/MacOS/$main_executable" ]] || continue
   if file -b "$code" | grep -q 'Mach-O'; then
     codesign "${sign_args[@]}" "$code"
   fi

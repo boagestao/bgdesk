@@ -88,6 +88,13 @@ class MacOSPackagingTests(unittest.TestCase):
         (framework / "Resources").symlink_to("Versions/Current/Resources")
         return app
 
+    def test_unsigned_helper_is_signed_before_sealing_main_executable(self):
+        app = self.make_app()
+        for name in ('BGDesk', 'service'):
+            self.run_command(['codesign', '--remove-signature', app / 'Contents/MacOS' / name])
+        self.run_command(['bash', SIGN, app, '-', RELEASE_ENTITLEMENTS])
+        self.run_command(['codesign', '--verify', '--deep', '--strict', app])
+
     def mount_image(self, image):
         mount = self.base / "mounted"
         mount.mkdir()
@@ -254,6 +261,7 @@ exit "$TEST_GATEKEEPER_EXIT"
         (app / "Contents/MacOS").mkdir(parents=True)
         (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": "br.com.boagestao.bgdesk",
+            "CFBundleExecutable": "BGDesk",
         }))
         archive = self.base / "release.dmg"
         archive.write_bytes(b"previous release")

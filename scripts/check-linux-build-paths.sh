@@ -39,6 +39,7 @@ echo
 echo "-- Required packaging files --"
 for f in \
   res/bgdesk.service \
+  res/xorg.conf \
   res/bgdesk.desktop \
   res/bgdesk-link.desktop \
   res/pam.d/bgdesk.debian \

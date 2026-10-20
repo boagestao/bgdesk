@@ -8,7 +8,7 @@ on:
       platforms:
         description: Platforms to validate (publishing requires all)
         type: choice
-        options: [all, macos, windows, linux]
+        options: [all, macos, windows, linux, macos-aarch64, macos-x86_64, linux-x86_64, linux-aarch64, windows-x86_64]
         default: all
       publish:
         description: Publish a new Cargo.toml version to R2 after all builds pass
@@ -54,8 +54,8 @@ jobs:
       - name: Validate credentials and build plan
         id: plan
         env:
-          BUILD_PLATFORMS: ${{ inputs.platforms || 'all' }}
-          PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
+          BUILD_PLATFORMS: ${{ inputs.platforms || vars.BGDESK_RELEASE_TARGET || 'all' }}
+          PUBLISH_RELEASE: ${{ (github.event_name == 'push' && (vars.BGDESK_RELEASE_TARGET == '' || vars.BGDESK_RELEASE_TARGET == 'all')) || inputs.publish }}
           BGDESK_CONFIG_SSH_KEY: ${{ secrets.BGDESK_CONFIG_SSH_KEY }}
           BGDESK_CONFIG_TOKEN: ${{ secrets.BGDESK_CONFIG_TOKEN }}
           BGDESK_CONFIG_ARCHIVE: ${{ secrets.BGDESK_CONFIG_ARCHIVE }}
@@ -141,6 +141,8 @@ jobs:
     name: ${{ matrix.platform }} / ${{ matrix.arch }} (cliente + suporte)
     needs: [preflight, bridges]
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     env:
       BGDESK_REQUIRE_BRIDGE: '1'
       BGDESK_VERSION: ${{ needs.preflight.outputs.version }}
@@ -236,6 +238,14 @@ jobs:
           version: '15.0.6'
           directory: ${{ runner.temp }}/bgdesk-llvm
           env: false
+      - name: Check Windows certificate and timestamp before compiling
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP 'bgdesk-signing-probe.exe'
+          Copy-Item "$env:SystemRoot/System32/where.exe" $probe
+          try { ./scripts/ci/sign-windows.ps1 -Path $probe }
+          finally { Remove-Item $probe -Force -ErrorAction SilentlyContinue }
       - name: Configure Windows build environment
         if: runner.os == 'Windows'
         run: |
@@ -294,6 +304,8 @@ jobs:
     needs: [preflight, build]
     if: needs.preflight.outputs.publish == 'true' && needs.preflight.outputs.new_release == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -316,3 +328,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: python scripts/ci/r2-publish.py --version '${{ needs.preflight.outputs.version }}'
+      - name: Publish complete stable GitHub Release after R2 verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci/github-release.py --stable --version '${{ needs.preflight.outputs.version }}'

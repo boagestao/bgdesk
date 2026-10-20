@@ -22,7 +22,7 @@ def distribution_matrix(platforms):
     return {"include": [
         dict(platform=platform, arch=arch, runner=runner)
         for platform, arch, runner in TARGETS
-        if platforms == "all" or platforms == platform
+        if platforms == "all" or platforms in (platform, f"{platform}-{arch}")
     ]}
 
 
@@ -60,7 +60,7 @@ def main():
         config_source = "archive"
     elif not (os.environ.get("BGDESK_CONFIG_SSH_KEY") or os.environ.get("BGDESK_CONFIG_TOKEN")):
         required.append("BGDESK_CONFIG_ARCHIVE (or a read-only config token/SSH key)")
-    if platforms in ("all", "macos"):
+    if any(target['platform'] == 'macos' for target in active):
         required += ["MACOS_P12_BASE64", "MACOS_P12_PASSWORD", "MACOS_NOTARY_APPLE_ID", "MACOS_NOTARY_PASSWORD"]
     if publish:
         required += ["BGDESK_UPDATE_SIGNING_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
