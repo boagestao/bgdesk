@@ -49,8 +49,11 @@ def sign(path):
         run_phase('Export certificate', [openssl, 'pkcs12', '-export', '-in',
                   str(ROOT / 'config/certs/sign.crt'), '-inkey', str(ROOT / 'config/certs/sign.key'),
                   '-passin', 'pass:', '-out', pfx, '-passout', 'env:BGDESK_PFX_PASSWORD'], environment=environment, timeout=30)
+        # CurrentUser/Root invokes CryptoAPI's consent dialog even when elevated.
+        # GitHub's disposable Windows runner is an administrator; the machine
+        # root store supports unattended import and is discarded with the VM.
         run_phase('Trust private CA on disposable runner', ['pwsh', '-NoLogo', '-NoProfile', '-NonInteractive',
-                  '-Command', 'Import-Certificate -FilePath $env:BGDESK_CA_FILE -CertStoreLocation Cert:/CurrentUser/Root -ErrorAction Stop | Out-Null'],
+                  '-Command', 'Import-Certificate -FilePath $env:BGDESK_CA_FILE -CertStoreLocation Cert:/LocalMachine/Root -ErrorAction Stop | Out-Null'],
                   environment=environment, timeout=30)
         run_phase('Sign executable', [tool, 'sign', '/v', '/fd', 'SHA256', '/f', pfx,
                   '/p', environment['BGDESK_PFX_PASSWORD'], str(path)], environment=environment)

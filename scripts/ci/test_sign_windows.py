@@ -44,6 +44,10 @@ class WindowsSigningTests(unittest.TestCase):
                     path.write_bytes(b'temporary key container')
                     pfx.append(path)
                     self.assertIn('-passin', command)
+                elif label == 'Trust private CA on disposable runner':
+                    self.assertIn('-NonInteractive', command)
+                    self.assertIn('Cert:/LocalMachine/Root', command[-1])
+                    self.assertNotIn('CurrentUser/Root', command[-1])
                 elif label == 'Sign executable':
                     self.assertNotIn('/tr', command)
                     raise RuntimeError('signing failed')

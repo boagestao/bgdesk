@@ -257,3 +257,9 @@ informam a fase sem imprimir senhas. O teste de assinatura de um PE temporário
 ocorre antes da compilação, evitando gastar um build inteiro com certificado ou
 serviço de timestamp indisponível. Os binários continuam exigindo assinatura e
 timestamp válidos.
+
+A CA de assinatura é importada em `LocalMachine/Root` somente na VM Windows
+descartável do GitHub, que executa com privilégios administrativos. O store
+`CurrentUser/Root` abre uma confirmação CryptoAPI e falha em sessão sem interface
+com `UI is not allowed in this operation`. Os limites de tempo e a verificação
+de assinatura/timestamp continuam obrigatórios.
