@@ -519,8 +519,8 @@ pub fn check_update_as_root() -> ResultType<bool> {
         log::info!("[root-update] Auto update is disabled, skipping.");
         return Ok(false);
     }
-    if crate::is_custom_client() {
-        log::info!("[root-update] Custom client detected, skipping stock update.");
+    if !crate::common::uses_public_update_channel() {
+        log::info!("[root-update] Public update channel is not enabled for this client.");
         return Ok(false);
     }
     // Clean up only old temp dirs from previous failed updates. The detached

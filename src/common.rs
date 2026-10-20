@@ -1005,7 +1005,7 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
-    if is_custom_client() {
+    if !uses_public_update_channel() {
         return;
     }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
@@ -1063,6 +1063,11 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // The static website feed uses strict TLS and never sends device identifiers.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    // The Windows background scheduler calls this directly, bypassing the UI check.
+    if !uses_public_update_channel() {
+        clear_software_update_url();
+        return Ok(());
+    }
     let url = crate::update_source::latest_url();
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
@@ -2490,6 +2495,7 @@ pub fn read_custom_client(config: &str) {
         return;
     };
 
+    crate::update_policy::CHANNEL.mark_custom_config_loaded();
     if let Some(app_name) = data.remove("app-name") {
         if let Some(app_name) = app_name.as_str() {
             *config::APP_NAME.write().unwrap() = app_name.to_owned();
@@ -2573,6 +2579,10 @@ pub fn get_builtin_option(key: &str) -> String {
 #[inline]
 pub fn is_custom_client() -> bool {
     get_app_name() != "RustDesk"
+}
+
+pub fn uses_public_update_channel() -> bool {
+    crate::update_policy::CHANNEL.uses_public_channel(&get_app_name())
 }
 
 pub fn verify_login(_raw: &str, _id: &str) -> bool {
@@ -2967,6 +2977,18 @@ mod tests {
         time::{interval, interval_at, sleep, Duration, Instant, Interval},
     };
     use std::collections::HashSet;
+
+    #[test]
+    fn bgdesk_public_update_channel_does_not_change_custom_branding() {
+        assert_eq!(get_app_name(), "BGDesk");
+        assert!(is_custom_client());
+        assert!(uses_public_update_channel());
+        #[cfg(feature = "flutter")]
+        assert_eq!(
+            crate::flutter_ffi::main_get_common("uses-public-update-channel".to_owned()),
+            "true"
+        );
+    }
 
     #[test]
     fn parses_stable_bgdesk_release_url() {

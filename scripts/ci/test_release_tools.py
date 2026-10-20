@@ -52,6 +52,68 @@ class FakeS3:
 
 
 class ReleaseToolsTests(unittest.TestCase):
+    def root_packages(self):
+        site = self.site()
+        records = []
+        for target in plan.distribution_matrix('all')['include']:
+            for edition in ('cliente', 'suporte'):
+                for fmt, _ in collect.specs(target['platform'], target['arch'], edition):
+                    record = dict(edition=edition, platform=target['platform'], arch=target['arch'], format=fmt)
+                    name = r2.root_artifact_name(edition, target['platform'], target['arch'], fmt)
+                    path = site / 'updates' / edition / 'v1.5.2' / name
+                    path.write_bytes(('package-' + name).encode())
+                    record.update(file_name='versioned-' + name, size=path.stat().st_size,
+                                  sha256=r2.file_hash(path))
+                    records.append((record, path))
+                (site / 'updates' / edition / 'v1.5.2' / 'bgdesk.dmg').unlink(missing_ok=True)
+        return site, records
+
+    def test_packages_are_uploaded_once_at_root_before_metadata_or_latest(self):
+        site, records = self.root_packages()
+        s3, verified = FakeS3(), []
+        def verify(origin, key, path, small=False):
+            if len(verified) < 22:
+                self.assertEqual(len(s3.writes), 22)
+                self.assertNotIn('/', key)
+            verified.append(key)
+        r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
+                   verify=verify, root_artifacts=True)
+        packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst'))]
+        self.assertEqual(len(packages), 22)
+        self.assertTrue(all('/' not in key for key in packages))
+        self.assertTrue(all(s3.objects[key]['cache'] == 'no-store, max-age=0' for key in packages))
+        self.assertEqual(set(packages), set(verified[:22]))
+        self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
+        writes = len(s3.writes)
+        r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
+                   verify=lambda *a, **kw: None, root_artifacts=True)
+        self.assertEqual(len(s3.writes), writes)
+
+    def test_root_verification_failure_never_activates_metadata_or_feed(self):
+        site, records = self.root_packages()
+        s3 = FakeS3()
+        def fail(*args, **kwargs):
+            raise ValueError('Root download unavailable')
+        with self.assertRaisesRegex(ValueError, 'Root download'):
+            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
+                       verify=fail, root_artifacts=True)
+        self.assertTrue(all('/' not in key for key in s3.writes))
+        records[-1][1].write_bytes(b'tampered')
+        s3 = FakeS3()
+        with self.assertRaisesRegex(ValueError, 'differs from the build'):
+            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2', root_artifacts=True)
+        self.assertEqual(s3.writes, [])
+
+    def test_root_names_are_unique_including_the_four_future_win32_packages(self):
+        _, records = self.root_packages()
+        names = {r2.root_artifact_name(r['edition'], r['platform'], r['arch'], r['format']) for r, _ in records}
+        for edition in ('cliente', 'suporte'):
+            names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'exe'))
+            names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'inno-exe'))
+        self.assertEqual(len(names), 26)
+        self.assertIn('bgdesk-cliente-win32.exe', names)
+        self.assertIn('bgdesk-cliente-update-win32.exe', names)
+
     def test_native_builds_use_the_manifest_vcpkg_baseline(self):
         root = Path(__file__).resolve().parents[2]
         baseline = json.loads((root / 'vcpkg.json').read_text())['vcpkg-configuration']['default-registry']['baseline']
@@ -166,8 +228,30 @@ class ReleaseToolsTests(unittest.TestCase):
         for call in prepare.call_args_list:
             command = call.args[0]
             self.assertEqual(command[command.index('--published-at') + 1], stamp)
+            self.assertIn('--root-artifacts', command)
         marker = json.loads(s3.objects['updates/releases/v1.5.2.json']['body'])
         self.assertEqual(marker['commit'], source_commit)
+        self.assertEqual(marker['artifact_layout'], 'root')
+
+    def test_published_root_layout_retries_check_the_existing_root_without_reuploading(self):
+        s3 = FakeS3()
+        path = self.root / 'package.exe'
+        path.write_bytes(b'original')
+        marker = self.root / 'marker.json'
+        marker.write_text('{}')
+        record = dict(edition='cliente', platform='windows', arch='x86_64', format='exe',
+                      file_name='versioned-app.exe', sha256=r2.file_hash(path))
+        r2.upload(s3, 'bucket', marker, 'updates/releases/v1.5.2.json', metadata={'artifact-layout': 'root'})
+        r2.upload(s3, 'bucket', path, 'bgdesk-cliente-update-win64.exe', immutable=False)
+        with patch.dict(os.environ, {'R2_PUBLIC_ORIGIN': 'https://download.bgdesk.com', 'R2_BUCKET': 'bucket'}), \
+             patch('sys.argv', ['publish', '--version', '1.5.2', '--source-commit', 'a' * 40]), \
+             patch.object(r2, 'client', return_value=s3), patch.object(r2, 'read_records', return_value=[(record, path)]):
+            r2.main()
+            path.write_bytes(b'changed!')
+            record['sha256'] = r2.file_hash(path)
+            with self.assertRaisesRegex(ValueError, 'Published release differs'):
+                r2.main()
+        self.assertEqual(len(s3.writes), 2)
 
     def test_already_published_retry_requires_identical_immutable_packages(self):
         s3 = FakeS3()

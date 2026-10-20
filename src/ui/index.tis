@@ -12,6 +12,7 @@ const disable_installation = handler.is_disable_installation();
 const disable_account = handler.is_disable_account();
 const disable_settings = handler.is_disable_settings();
 const is_custom_client = handler.is_custom_client();
+const uses_public_update_channel = handler.uses_public_update_channel();
 const disable_ab = handler.is_disable_ab();
 const hide_server_settings = handler.get_builtin_option("hide-server-settings") == "Y";
 const hide_proxy_settings = handler.get_builtin_option("hide-proxy-settings") == "Y";
@@ -546,7 +547,7 @@ class MyIdMenu: Reactor.Component {
                 <div .separator />
                 <li #allow-darktheme><span>{svg_checkmark}</span>{translate('Dark Theme')}</li>
                 <Languages />
-                {disable_installation ? "" : <li #allow-auto-update><span>{svg_checkmark}</span>{translate('Auto update')}</li>} 
+                {disable_installation || !uses_public_update_channel ? "" : <li #allow-auto-update><span>{svg_checkmark}</span>{translate('Auto update')}</li>}
                 <li #about>{translate('About')} {" "}{handler.get_app_name()}</li>
             </menu>
         </popup>;
@@ -825,7 +826,7 @@ class UpdateMe: Reactor.Component {
         return <div .install-me>
             <div>{translate('Status')}</div>
             <div>There is a newer version of {handler.get_app_name()} ({handler.get_new_version()}) available.</div>
-            {is_custom_client
+            {!uses_public_update_channel
                 ? <div style="font-size: 1em; font-weight: normal; text-align: left; padding-top: 1em;">{translate('Enable \"Auto update\" or contact your administrator for the latest version.')}</div>
                 : <div #install-me.link>{translate('Click to ' + update_or_download)}</div>}
             <div #download-percent style="display:hidden; padding-top: 1em;" />

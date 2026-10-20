@@ -96,5 +96,27 @@ def validate_release_base_url(value):
     return value
 
 
-def release_artifact_url(release_base_url, release_id, file_name):
+def release_artifact_url(release_base_url, release_id, file_name, artifact_base_url=None):
+    if artifact_base_url is not None:
+        validate_release_base_url(artifact_base_url)
+        if urlsplit(artifact_base_url).netloc != urlsplit(release_base_url).netloc:
+            raise ValueError("artifact origin must match the release origin")
+        if urlsplit(artifact_base_url).path:
+            raise ValueError("root artifact URL must be an HTTPS origin without a path")
+        return f"{artifact_base_url}/{file_name}"
     return f"{release_base_url}/{release_id}/{file_name}"
+
+
+def root_artifact_name(edition, platform, arch, file_format):
+    if edition not in ("cliente", "suporte"):
+        raise ValueError("Invalid artifact edition")
+    prefix = f"bgdesk-{edition}"
+    if platform == "linux" and arch in ("x86_64", "aarch64"):
+        if file_format in ("deb", "rpm", "AppImage") or (arch == "x86_64" and file_format == "pkg.tar.zst"):
+            return f"{prefix}-{arch}.{file_format}"
+    if platform == "macos" and arch in ("x86_64", "aarch64") and file_format == "dmg":
+        return f"{prefix}-{arch}.dmg"
+    if platform == "windows" and arch in ("x86_64", "x86") and file_format in ("exe", "inno-exe"):
+        suffix = "win32" if arch == "x86" else "win64"
+        return f"{prefix}{'-update' if file_format == 'exe' else ''}-{suffix}.exe"
+    raise ValueError("Unsupported root artifact selector")

@@ -85,6 +85,31 @@ class WebsiteReleaseTests(unittest.TestCase):
         self.assertFalse((latest.parent / "v1.5.3").exists())
         self.assertEqual(list(latest.parent.glob(".release-*")), [])
 
+    def test_root_downloads_are_signed_with_stable_names_and_original_hashes(self):
+        self.prepare(extra=('--root-artifacts',))
+        release = self.public / 'updates/suporte/v1.5.2'
+        data = json.loads((release / 'bgdesk-update.json').read_bytes())
+        artifact = data['artifacts'][0]
+        name = 'bgdesk-suporte-aarch64.dmg'
+        self.assertEqual(artifact['file_name'], name)
+        self.assertEqual(artifact['url'], f'{website.ORIGIN}/{name}')
+        self.assertEqual((release / name).read_bytes(), self.artifact.read_bytes())
+        self.assertIn(f'href="{website.ORIGIN}/{name}"', (release / 'index.html').read_text())
+        website.load_key(self.key)
+        args = argparse.Namespace(metadata=release / 'bgdesk-update.json',
+            signature=release / 'bgdesk-update.json.sig', artifact=[str(release / name)],
+            version='1.5.2', release_id='v1.5.2', package_id='bgdesk-suporte',
+            release_base_url=f'{website.ORIGIN}/updates/suporte', artifact_base_url=website.ORIGIN)
+        metadata.command_verify(args)
+        for origin in ('https://untrusted.example', website.ORIGIN + '/nested'):
+            args.artifact_base_url = origin
+            with self.assertRaises(SystemExit):
+                metadata.command_verify(args)
+        args.artifact_base_url = website.ORIGIN
+        (release / name).write_bytes(b'tampered')
+        with self.assertRaises(SystemExit):
+            metadata.command_verify(args)
+
     def test_rejects_wrong_signing_key_and_key_replacement(self):
         self.run_cli("init-key", success=False)
         self.source.write_text(self.source.read_text().replace("public_key:", "wrong_key:"))

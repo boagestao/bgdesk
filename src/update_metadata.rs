@@ -155,8 +155,11 @@ pub(crate) fn verify_update_metadata(
     signature_bytes: &[u8],
     requirements: UpdateMetadataRequirements<'_>,
 ) -> ResultType<VerifiedUpdateArtifact> {
-    let artifact_url_policy =
-        ArtifactUrlPolicy::ExactPrefix(requirements.expected_artifact_url_prefix);
+    let root_prefix = format!("{}/", crate::update_source::UPDATE_ORIGIN);
+    let artifact_url_policy = ArtifactUrlPolicy::ReleaseOrRoot {
+        release_prefix: requirements.expected_artifact_url_prefix,
+        root_prefix: &root_prefix,
+    };
     let metadata_requirements = MetadataRequirements {
         expected_version: requirements.expected_version,
         expected_release_id: requirements.expected_release_id,

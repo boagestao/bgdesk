@@ -4157,9 +4157,12 @@ void earlyAssert() {
   assert('\1' == '1');
 }
 
+bool get usesPublicUpdateChannel =>
+    !isWeb && bind.mainGetCommonSync(key: 'uses-public-update-channel') == 'true';
+
 void checkUpdate() {
   if (!isWeb) {
-    if (!bind.isCustomClient()) {
+    if (usesPublicUpdateChannel) {
       platformFFI.registerEventHandler(
           kCheckSoftwareUpdateFinish, kCheckSoftwareUpdateFinish,
           (Map<String, dynamic> evt) async {

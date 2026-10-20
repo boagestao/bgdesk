@@ -300,6 +300,10 @@ impl UI {
         crate::common::is_custom_client()
     }
 
+    pub fn uses_public_update_channel(&self) -> bool {
+        crate::common::uses_public_update_channel()
+    }
+
     pub fn is_disable_settings(&self) -> bool {
         hbb_common::config::is_disable_settings()
     }
@@ -726,6 +730,7 @@ impl sciter::EventHandler for UI {
         fn is_xfce();
         fn using_public_server();
         fn is_custom_client();
+        fn uses_public_update_channel();
         fn is_outgoing_only();
         fn is_incoming_only();
         fn is_disable_settings();

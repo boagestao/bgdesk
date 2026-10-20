@@ -74,7 +74,7 @@ def validate_or_fail(function, *args):
         fail(str(error))
 
 
-def artifact_metadata(spec, release_id, release_base_url):
+def artifact_metadata(spec, release_id, release_base_url, artifact_base_url=None):
     platform, arch, file_format, raw_path = spec
     if not all(value.strip() for value in (platform, arch, file_format)):
         fail("artifact selector fields must not be empty")
@@ -88,7 +88,7 @@ def artifact_metadata(spec, release_id, release_base_url):
         "platform": platform,
         "arch": arch,
         "format": file_format,
-        "url": release_artifact_url(release_base_url, release_id, file_name),
+        "url": validate_or_fail(release_artifact_url, release_base_url, release_id, file_name, artifact_base_url),
         "file_name": file_name,
         "size": size,
         "sha256": sha256_hex(path),
@@ -107,7 +107,7 @@ def command_sign(args):
         validate_release_base_url, args.release_base_url
     )
     artifacts = [
-        artifact_metadata(spec, args.release_id, release_base_url)
+        artifact_metadata(spec, args.release_id, release_base_url, getattr(args, 'artifact_base_url', None))
         for spec in args.artifact
     ]
     selectors = [(item["platform"], item["arch"], item["format"]) for item in artifacts]
@@ -217,8 +217,8 @@ def command_verify(args):
     artifacts = validated_artifacts(metadata, local_artifacts)
     for artifact in artifacts:
         file_name = artifact["file_name"]
-        expected_url = release_artifact_url(
-            release_base_url, args.release_id, file_name
+        expected_url = validate_or_fail(release_artifact_url,
+            release_base_url, args.release_id, file_name, getattr(args, 'artifact_base_url', None)
         )
         if artifact["url"] != expected_url:
             fail(f"artifact URL mismatch for {file_name}")
@@ -267,6 +267,7 @@ def build_parser():
     sign.add_argument("--release-id", required=True)
     sign.add_argument("--package-id", required=True)
     sign.add_argument("--release-base-url", required=True)
+    sign.add_argument("--artifact-base-url", help="same HTTPS origin; serve packages directly from its root")
     sign.add_argument("--published-at", required=True)
     sign.add_argument("--metadata-out", required=True)
     sign.add_argument("--signature-out", required=True)
@@ -279,6 +280,7 @@ def build_parser():
     verify.add_argument("--release-id", required=True)
     verify.add_argument("--package-id", required=True)
     verify.add_argument("--release-base-url", required=True)
+    verify.add_argument("--artifact-base-url")
     verify.set_defaults(func=command_verify)
     check_key = commands.add_parser("check-key")
     check_key.add_argument(

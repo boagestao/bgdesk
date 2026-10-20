@@ -83,6 +83,28 @@ class WindowsX86Tests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 win32.require_x86_archive(path)
 
+    def test_cargo_json_is_utf8_even_when_windows_uses_a_legacy_code_page(self):
+        package = self.root / 'registry/ação-Ё/libsodium-sys-0.2.7'
+        library = package / 'msvc/Win32/Release/v142/libsodium.lib'
+        library.parent.mkdir(parents=True)
+        library.write_bytes(coff_archive(0x14c))
+        metadata = json.dumps(dict(packages=[dict(name='libsodium-sys', version='0.2.7',
+                            manifest_path=str(package / 'Cargo.toml'))]), ensure_ascii=False).encode('utf-8')
+        # U+0401 contains byte 0x81 in UTF-8, the undefined CP1252 byte seen in Actions.
+        with self.assertRaises(UnicodeDecodeError):
+            metadata.decode('cp1252')
+        check_output = subprocess.check_output
+        def cargo_json(*args, **kwargs):
+            # Simulate Windows' fallback locale; the caller must explicitly override it.
+            kwargs.setdefault('encoding', 'cp1252')
+            return check_output([os.sys.executable, '-c',
+                                 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.argv[1]))',
+                                 metadata.hex()], **kwargs)
+        with patch.object(win32.subprocess, 'check_output', side_effect=cargo_json):
+            config = win32.sodium_config(self.root)
+        sodium = tomllib.loads(config.read_text(encoding='utf-8'))['target'][win32.TARGET]['sodium']
+        self.assertEqual(sodium['lib'], str(library.parent))
+
     def test_host_ffmpeg_does_not_satisfy_the_win32_target_dependencies(self):
         required = ('include/libavutil/attributes.h', 'include/libavutil/opt.h',
                     'include/libavcodec/avcodec.h', 'lib/avutil.lib', 'lib/avcodec.lib')

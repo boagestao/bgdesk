@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 import generate_update_metadata as metadata
+from update_metadata_policy import root_artifact_name
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KEY_FILE = Path.home() / ".config/bgdesk/update-signing.json"
@@ -82,7 +83,7 @@ def validate_version(version, release_id):
 
 def release_page(version, edition, artifacts):
     links = "\n".join(
-        f'<li><a href="{html.escape(item["file_name"], quote=True)}">'
+        f'<li><a href="{html.escape(item["url"], quote=True)}">'
         f'{html.escape(item["platform"])} / {html.escape(item["arch"])} '
         f'({html.escape(item["format"])})</a></li>'
         for item in artifacts
@@ -133,7 +134,8 @@ def prepare_release(args):
             metadata.validate_or_fail(metadata.validate_artifact_file_name, path.name)
             if path.name in {"bgdesk-update.json", "bgdesk-update.json.sig", "index.html"}:
                 metadata.fail("artifact name conflicts with release metadata")
-            target = stage / path.name
+            name = root_artifact_name(args.edition, platform, arch, file_format) if args.root_artifacts else path.name
+            target = stage / name
             if target.exists():
                 metadata.fail("duplicate artifact file name")
             shutil.copyfile(path, target)
@@ -142,6 +144,7 @@ def prepare_release(args):
         common = dict(
             version=args.version, release_id=release_id,
             package_id=f"bgdesk-{args.edition}", release_base_url=base_url,
+            artifact_base_url=ORIGIN if args.root_artifacts else None,
         )
         metadata_path = stage / "bgdesk-update.json"
         signature_path = stage / "bgdesk-update.json.sig"
@@ -181,6 +184,8 @@ def parser():
     prepare.add_argument("--version", required=True)
     prepare.add_argument("--release-id")
     prepare.add_argument("--published-at", help="fixed RFC 3339 timestamp for reproducible CI retries")
+    prepare.add_argument("--root-artifacts", action="store_true",
+                         help="sign URLs for the existing root downloads, without versioned package copies in R2")
     prepare.add_argument("--artifact", action="append", nargs=4, required=True,
                          metavar=("PLATFORM", "ARCH", "FORMAT", "PATH"))
     prepare.add_argument("--site-public", default=str(ROOT.parent / "bgdesk-webpage/public"))

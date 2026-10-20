@@ -45,7 +45,6 @@ pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String>
 
 pub(crate) fn download_file_name(download_url: &str) -> Option<&str> {
     let (release, file_name) = download_url.rsplit_once('/')?;
-    release_id_from_update_url(release).ok()?;
     if file_name.is_empty()
         || matches!(file_name, "." | "..")
         || !file_name
@@ -54,6 +53,10 @@ pub(crate) fn download_file_name(download_url: &str) -> Option<&str> {
     {
         return None;
     }
+    if release == UPDATE_ORIGIN && file_name.starts_with(&format!("bgdesk-{UPDATE_EDITION}-")) {
+        return Some(file_name);
+    }
+    release_id_from_update_url(release).ok()?;
     // A release URL may have a trailing slash, but artifact paths must be canonical.
     let release_id = release_id_from_update_url(release).ok()?;
     (download_url == format!("{}/{file_name}", release_url(&release_id))).then_some(file_name)
@@ -126,5 +129,35 @@ mod tests {
         for version in ["v1.5.2-rc1", "0.0.0", "1.2", "65536.1.1"] {
             assert!(display_version_from_release_id(version).is_err());
         }
+    }
+
+    #[test]
+    fn accepts_same_edition_downloads_at_root_without_relaxing_origin_or_path_checks() {
+        let name = format!("bgdesk-{UPDATE_EDITION}-update-win64.exe");
+        assert_eq!(
+            download_file_name(&format!("{UPDATE_ORIGIN}/{name}")),
+            Some(name.as_str())
+        );
+        for url in [
+            format!("{UPDATE_ORIGIN}/nested/{name}"),
+            format!("{UPDATE_ORIGIN}//{name}"),
+            format!("{UPDATE_ORIGIN}/{name}?x=1"),
+            format!("{UPDATE_ORIGIN}/{name}#fragment"),
+            format!("{UPDATE_ORIGIN}/{name}/../app.exe"),
+            format!("{UPDATE_ORIGIN}/app.exe"),
+            format!("https://untrusted.example/{name}"),
+            format!("{UPDATE_ORIGIN}:443/{name}"),
+        ] {
+            assert!(download_file_name(&url).is_none(), "{url}");
+        }
+        let other = if UPDATE_EDITION == "cliente" {
+            "suporte"
+        } else {
+            "cliente"
+        };
+        assert!(
+            download_file_name(&format!("{UPDATE_ORIGIN}/bgdesk-{other}-update-win64.exe"))
+                .is_none()
+        );
     }
 }

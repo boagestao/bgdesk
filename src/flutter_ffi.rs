@@ -2724,7 +2724,9 @@ pub fn main_get_printer_names() -> SyncReturn<String> {
 }
 
 pub fn main_get_common(key: String) -> String {
-    if key == "is-printer-installed" {
+    if key == "uses-public-update-channel" {
+        return crate::common::uses_public_update_channel().to_string();
+    } else if key == "is-printer-installed" {
         #[cfg(target_os = "windows")]
         {
             return match remote_printer::is_rd_printer_installed(&get_app_name()) {

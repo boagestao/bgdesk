@@ -29,7 +29,7 @@ maiores são oferecidas. Use três números (`MAJOR.MINOR.PATCH`), com prefixo `
 opcional na pasta. Não use `latest`, `nightly` ou sufixos como `-rc1` na release.
 `{"url":""}` significa que nenhuma atualização está publicada.
 
-Dentro da pasta da release ficam os instaladores, `bgdesk-update.json`,
+No preparo manual legado, dentro da pasta da release ficam os instaladores, `bgdesk-update.json`,
 `bgdesk-update.json.sig` e uma página de download `index.html`. O manifesto informa
 versão, edição, sistema, arquitetura, formato, URL, tamanho e SHA-256 de cada
 instalador. Sua assinatura Ed25519 é verificada antes de confiar nesses dados;
@@ -158,3 +158,77 @@ ferramenta de distribuição.
 cargo test --release --lib update_
 cargo test --release --lib --features incoming-only update_
 ```
+
+## Política do canal público BGDesk
+
+O canal público é uma política distinta de `is_custom_client()`. Essa função
+legada compara o nome com RustDesk e continua sendo usada em personalização,
+preferências, staging do Windows e outros fluxos. Ela não deve decidir se uma
+distribuição pública BGDesk consulta as atualizações.
+
+`common::uses_public_update_channel()` permite o canal somente com o nome exato
+`BGDesk` e sem configuração personalizada assinada carregada. A configuração
+personalizada é marcada após verificar assinatura e JSON, mesmo quando mantém o
+nome BGDesk. Uma vez personalizada, a instância não entra no canal público.
+Configurar um servidor de conexão ou registrar uma licença BGDesk não transforma
+a distribuição pública em um cliente personalizado.
+
+A mesma política controla a consulta de versões, os avisos e ajustes Flutter,
+o cartão Sciter, o serviço macOS e a resolução de artefatos do feed público.
+O Windows já consultava diretamente o feed em segundo plano; a correção também
+protege esse caminho contra atualização de clientes personalizados pelo canal
+público. Os mecanismos próprios de personalização e licenciamento não mudam.
+
+`enable-check-update` controla a consulta e o aviso na abertura. A instalação
+automática exige `allow-auto-update` efetivamente habilitado (`Y`), além de
+instalação/serviço compatível. A política pública não força essas preferências.
+No Linux o atualizador não instala pacotes automaticamente; use os downloads
+ou o gestor de pacotes. Cliente e suporte usam feeds e identidades de pacote
+separados; arquitetura e formato são selecionados no manifesto assinado.
+
+### Migração e comprovação de upgrade
+
+Publicar os pacotes e validar R2, assinatura Ed25519, SHA256 e tamanho comprova
+a distribuição. Isso não comprova que uma versão instalada consulta o feed e
+conclui a troca do aplicativo.
+
+Versões anteriores que pulam a consulta por classificarem BGDesk como custom
+precisam receber a primeira versão corrigida por instalação manual ou por uma
+ferramenta de distribuição administrada. Um feed novo não corrige esse bloqueio
+no binário antigo. No Windows o caminho automático em segundo plano não tinha
+esse mesmo bloqueio, mas ainda depende da opção e do serviço efetivos.
+
+Antes de considerar a atualização automática validada, executar em instalações
+descartáveis das duas edições: instalar uma versão com a política corrigida,
+habilitar as opções desejadas, disponibilizar uma versão superior assinada e
+confirmar consulta, seleção da edição/arquitetura, download verificado, troca,
+reinício do serviço e versão final. Repetir com uma conexão ativa para confirmar
+adiamento e com configuração personalizada para confirmar isolamento. A migração
+da versão antiga deve ser testada separadamente. Registrar versões de origem e
+destino e os logs; testes de política não substituem esse upgrade real.
+
+## Um pacote por alvo na raiz do R2
+
+A publicação Actions usa `website_release.py prepare --root-artifacts`.
+Os manifestos continuam versionados e assinados, mas a URL de cada pacote aponta
+para o arquivo da raiz já usado pelo site, por exemplo
+`https://download.bgdesk.com/bgdesk-cliente-aarch64.dmg` ou
+`https://download.bgdesk.com/bgdesk-suporte-update-win64.exe`. Não são criadas
+cópias de instaladores dentro de `updates/<edição>/v<versão>/` nas novas publicações.
+O histórico de binários continua no GitHub Releases.
+
+O aplicativo aceita a raiz do mesmo domínio HTTPS ou os caminhos antigos de
+release. Exige manifesto assinado da própria edição, versão, arquitetura,
+formato, tamanho e SHA-256; não baixa um arquivo arbitrário só porque está na raiz.
+Os pacotes da raiz usam `no-store`, enquanto os metadados assinados por versão
+são imutáveis. Durante uma substituição, um manifesto anterior pode encontrar
+bytes da versão seguinte: a diferença de hash impede a instalação e a tentativa
+seguinte deve consultar o feed atualizado. A publicação só anuncia o novo feed
+depois de conferir todos os pacotes e metadados.
+
+Os binários 1.5.1 ainda esperam URLs dentro da pasta de release; mesmo o caminho
+automático Windows que já consultava o feed precisa receber primeiro um build
+compatível com URLs da raiz por instalação manual ou distribuição administrada.
+Não reescrever os manifestos assinados da 1.5.1 para simular compatibilidade.
+As cópias antigas dessa versão ficam preservadas durante a transição; limpeza
+remota deve ocorrer somente depois de validar o novo deploy e a migração.

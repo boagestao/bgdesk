@@ -13,6 +13,8 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'res/update'))
+from update_metadata_policy import root_artifact_name
 USER_AGENT = "BGDesk-Release/1.0 (+https://bgdesk.com)"
 
 
@@ -44,17 +46,19 @@ def file_hash(path):
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def upload(s3, bucket, path, key, immutable=True):
+def upload(s3, bucket, path, key, immutable=True, metadata=None):
     digest = file_hash(path)
     previous = head(s3, bucket, key)
     if immutable and previous:
         if previous.get("Metadata", {}).get("sha256") != digest:
             raise ValueError(f"Immutable object already exists with different bytes: {key}; increase version")
         return
+    if not immutable and previous and previous['ContentLength'] == path.stat().st_size and previous.get('Metadata', {}).get('sha256') == digest:
+        return
     s3.upload_file(str(path), bucket, key, ExtraArgs={
         "ContentType": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
         "CacheControl": "public, max-age=31536000, immutable" if immutable else "no-store, max-age=0",
-        "Metadata": {"sha256": digest},
+        "Metadata": dict(metadata or {}, sha256=digest),
     })
     remote = head(s3, bucket, key)
     if not remote or remote["ContentLength"] != path.stat().st_size or remote.get("Metadata", {}).get("sha256") != digest:
@@ -103,12 +107,26 @@ def public_check(origin, key, path, small=False):
             raise ValueError(f"Public download URL has the wrong size: {key}")
 
 
-def publish(s3, bucket, site, records, origin, release_id, verify=public_check):
+def publish(s3, bucket, site, records, origin, release_id, verify=public_check, root_artifacts=False):
     # Never activate an edition while another edition still has missing objects.
+    if root_artifacts:
+        packages = []
+        for record, _ in records:
+            name = root_artifact_name(record['edition'], record['platform'], record['arch'], record['format'])
+            path = site / 'updates' / record['edition'] / release_id / name
+            if file_hash(path) != record['sha256'] or path.stat().st_size != record['size']:
+                raise ValueError(f'Root package differs from the build artifact: {name}')
+            packages.append((name, path))
+        for key, path in packages:
+            upload(s3, bucket, path, key, immutable=False)
+        for key, path in packages:
+            verify(origin, key, path)
     release_files = []
     for edition in ("cliente", "suporte"):
         directory = site / "updates" / edition / release_id
         for path in sorted(directory.iterdir()):
+            if root_artifacts and path.name not in {'bgdesk-update.json', 'bgdesk-update.json.sig', 'index.html'}:
+                continue  # Packages are stored once, at the root, shared with website downloads.
             if not path.is_file():
                 raise ValueError("Release must contain only regular files")
             key = path.relative_to(site).as_posix()
@@ -118,6 +136,8 @@ def publish(s3, bucket, site, records, origin, release_id, verify=public_check):
         verify(origin, key, path, small=path.name in {"bgdesk-update.json", "bgdesk-update.json.sig", "index.html"})
     # Preserve the existing site's stable Windows/Linux download links.
     for record, _ in records:
+        if root_artifacts:
+            break
         fmt, edition, arch = record["format"], record["edition"], record["arch"]
         aliases = []
         if record["platform"] == "linux":
@@ -155,7 +175,8 @@ def main():
         raise SystemExit("R2_PUBLIC_ORIGIN must be an HTTPS origin without a path or trailing slash")
     s3, bucket, release_id = client(), os.environ["R2_BUCKET"], f"v{args.version}"
     marker = f"updates/releases/{release_id}.json"
-    published = head(s3, bucket, marker) is not None
+    published_marker = head(s3, bucket, marker)
+    published = published_marker is not None
     if args.check_only:
         with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
             handle.write(f"new_release={str(not published).lower()}\n")
@@ -170,11 +191,11 @@ def main():
         # A publication-only retry must never attach freshly rebuilt/different
         # bytes to an already announced version, even from the same source commit.
         for record, path in records:
-            key = f"updates/{record['edition']}/{release_id}/{record['file_name']}"
+            key = root_artifact_name(record['edition'], record['platform'], record['arch'], record['format']) if published_marker.get('Metadata', {}).get('artifact-layout') == 'root' else f"updates/{record['edition']}/{release_id}/{record['file_name']}"
             remote = head(s3, bucket, key)
             if not remote or remote['ContentLength'] != path.stat().st_size or remote.get('Metadata', {}).get('sha256') != record['sha256']:
                 raise ValueError(f"Published release differs from supplied artifacts: {key}")
-        print("Version already published; all supplied artifacts match its immutable objects.")
+        print("Version already published; all supplied artifacts match the published package hashes.")
         return
     published_at = subprocess.check_output(["git", "show", "-s", "--format=%cI", source_commit], cwd=ROOT, text=True).strip()
     with tempfile.TemporaryDirectory(prefix="bgdesk-release-", dir=os.environ.get("RUNNER_TEMP")) as temp:
@@ -186,16 +207,16 @@ def main():
             command = [sys.executable, str(ROOT / "res/update/website_release.py"), "prepare",
                        "--version", args.version, "--edition", edition,
                        "--published-at", published_at,
-                       "--site-public", str(site), "--key-file", str(private_key)]
+                       "--site-public", str(site), "--key-file", str(private_key), "--root-artifacts"]
             for record, path in records:
                 if record["edition"] == edition:
                     command += ["--artifact", record["platform"], record["arch"], record["format"], str(path)]
             environment = dict(os.environ, BGDESK_UPDATE_ORIGIN=origin)
             subprocess.run(command, cwd=ROOT, env=environment, check=True)
-        publish(s3, bucket, site, records, origin, release_id)
+        publish(s3, bucket, site, records, origin, release_id, root_artifacts=True)
         completion = Path(temp) / "release.json"
-        completion.write_text(json.dumps({"version": args.version, "commit": source_commit}))
-        upload(s3, bucket, completion, marker)
+        completion.write_text(json.dumps({"version": args.version, "commit": source_commit, "artifact_layout": "root"}))
+        upload(s3, bucket, completion, marker, metadata={'artifact-layout': 'root'})
     print(f"BGDesk {args.version} published and verified at {origin}")
 
 

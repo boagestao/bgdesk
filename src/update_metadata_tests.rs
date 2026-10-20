@@ -53,6 +53,48 @@ fn sign_fixture(metadata: Value, signature_key_id: &str) -> Fixture {
 fn valid_fixture() -> Fixture {
     sign_fixture(metadata(), KEY_ID)
 }
+
+#[test]
+fn signed_root_downloads_keep_hash_identity_and_reject_other_origins_and_nested_paths() {
+    let name = format!("bgdesk-{}-update-win64.exe", crate::update_source::UPDATE_EDITION);
+    let origin = crate::update_source::UPDATE_ORIGIN;
+    let root = format!("{origin}/");
+    let release = format!("{origin}/updates/{}/v1.4.6/", crate::update_source::UPDATE_EDITION);
+    for url in [format!("{root}{name}"), format!("{release}{name}")] {
+        let mut document = metadata();
+        document["artifacts"][0]["file_name"] = json!(name);
+        document["artifacts"][0]["url"] = json!(url);
+        let fixture = sign_fixture(document, KEY_ID);
+        let keys = [key(fixture.public_key)];
+        let verify = |data: &Fixture| verify_update_metadata_with_options(&data.metadata, &data.signature,
+            VerificationOptions {
+                requirements: requirements(query()), expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+                artifact_url_policy: ArtifactUrlPolicy::ReleaseOrRoot { release_prefix: &release, root_prefix: &root },
+                trusted_keys: &keys,
+            });
+        let verified = verify(&fixture).unwrap();
+        assert_eq!(verified.sha256, SHA256);
+        assert_eq!(verified.size, 123456);
+        let mut corrupt = fixture;
+        corrupt.metadata.push(b' ');
+        assert!(verify(&corrupt).is_err());
+    }
+    for url in [format!("https://untrusted.example/{name}"), format!("{origin}/nested/{name}"),
+                format!("{origin}:443/{name}"), format!("{root}{name}?x=1"),
+                format!("{root}{name}#fragment"), format!("{origin}//{name}")] {
+        let mut document = metadata();
+        document["artifacts"][0]["file_name"] = json!(name);
+        document["artifacts"][0]["url"] = json!(url);
+        let fixture = sign_fixture(document, KEY_ID);
+        let keys = [key(fixture.public_key)];
+        assert!(verify_update_metadata_with_options(&fixture.metadata, &fixture.signature,
+            VerificationOptions {
+                requirements: requirements(query()), expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+                artifact_url_policy: ArtifactUrlPolicy::ReleaseOrRoot { release_prefix: &release, root_prefix: &root },
+                trusted_keys: &keys,
+            }).is_err(), "{url}");
+    }
+}
 fn key(public_key: [u8; 32]) -> TrustedUpdateKey {
     TrustedUpdateKey {
         key_id: KEY_ID,

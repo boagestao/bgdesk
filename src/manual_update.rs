@@ -44,13 +44,13 @@ fn parse_macos_update_args(args: &[String]) -> ResultType<MacosUpdateArguments<'
 }
 
 fn expected_update_package_id(
-    is_custom_client: bool,
+    uses_public_channel: bool,
     bundle_id: Option<String>,
 ) -> ResultType<String> {
     let bundle_id = bundle_id
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("client bundle identifier is missing"))?;
-    if !is_custom_client && bundle_id == PUBLIC_MACOS_BUNDLE_ID {
+    if uses_public_channel && bundle_id == PUBLIC_MACOS_BUNDLE_ID {
         return Ok(crate::update_metadata::PUBLIC_UPDATE_PACKAGE_ID.to_owned());
     }
     Ok(bundle_id)
@@ -58,7 +58,7 @@ fn expected_update_package_id(
 
 fn installed_update_package_id() -> ResultType<String> {
     expected_update_package_id(
-        crate::common::is_custom_client(),
+        crate::common::uses_public_update_channel(),
         crate::platform::macos::get_bundle_id(),
     )
 }
@@ -187,21 +187,21 @@ mod tests {
     fn resolves_public_and_custom_update_package_identity() {
         assert_eq!(
             crate::update_metadata::PUBLIC_UPDATE_PACKAGE_ID,
-            expected_update_package_id(false, Some("br.com.boagestao.bgdesk".to_owned())).unwrap()
+            expected_update_package_id(true, Some("br.com.boagestao.bgdesk".to_owned())).unwrap()
         );
         assert_eq!(
             "com.example.rustdesk-custom",
-            expected_update_package_id(true, Some("com.example.rustdesk-custom".to_owned()))
+            expected_update_package_id(false, Some("com.example.rustdesk-custom".to_owned()))
                 .unwrap()
         );
         assert_eq!(
             "com.example.same-name-custom",
-            expected_update_package_id(false, Some("com.example.same-name-custom".to_owned()))
+            expected_update_package_id(true, Some("com.example.same-name-custom".to_owned()))
                 .unwrap()
         );
         assert_eq!(
             "br.com.boagestao.bgdesk",
-            expected_update_package_id(true, Some("br.com.boagestao.bgdesk".to_owned())).unwrap()
+            expected_update_package_id(false, Some("br.com.boagestao.bgdesk".to_owned())).unwrap()
         );
         assert!(expected_update_package_id(false, None).is_err());
         assert!(expected_update_package_id(true, None).is_err());

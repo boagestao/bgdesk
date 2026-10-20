@@ -7,7 +7,12 @@ use url::Url;
 
 #[derive(Clone, Copy)]
 pub(super) enum ArtifactUrlPolicy<'a> {
+    #[cfg(test)]
     ExactPrefix(&'a str),
+    ReleaseOrRoot {
+        release_prefix: &'a str,
+        root_prefix: &'a str,
+    },
     #[cfg(target_os = "macos")]
     SignedHttps,
 }
@@ -43,11 +48,24 @@ fn validate_artifact_url_policy(
     policy: ArtifactUrlPolicy<'_>,
 ) -> ResultType<()> {
     match policy {
+        #[cfg(test)]
         ArtifactUrlPolicy::ExactPrefix(prefix) => {
             let expected_url = format!("{}{}", prefix, artifact.file_name);
             if artifact.url != expected_url {
                 return Err(anyhow!(
                     "update artifact URL is outside expected release prefix"
+                ));
+            }
+        }
+        ArtifactUrlPolicy::ReleaseOrRoot {
+            release_prefix,
+            root_prefix,
+        } => {
+            if artifact.url != format!("{release_prefix}{}", artifact.file_name)
+                && artifact.url != format!("{root_prefix}{}", artifact.file_name)
+            {
+                return Err(anyhow!(
+                    "update artifact URL is outside the release and download root"
                 ));
             }
         }

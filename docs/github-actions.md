@@ -158,10 +158,15 @@ releases. Mudar de domínio exige manter os canais anteriores acessíveis.
 3. O job de publicação confere os 22 artefatos esperados, seus tamanhos e
    hashes. O manifesto seleciona o pacote Windows nativo para atualização;
    o Inno Setup fica identificado como `inno-exe`, para download inicial.
-4. Assina os manifestos das duas edições com a chave de update, envia as pastas
-   versionadas ao R2 e verifica os objetos e suas URLs públicas.
-5. Atualiza os links estáveis de download Windows/Linux/macOS e os scripts de
-   instalação para Mac. Por último, troca os dois `latest.json` com `no-store`.
+4. Assina os manifestos das duas edições e envia cada pacote uma única vez para
+   a raiz do R2, nos mesmos endereços usados pelos downloads do site. O pacote
+   de atualização Windows (`bgdesk-<edição>-update-win64.exe`) é diferente do
+   instalador Inno (`bgdesk-<edição>-win64.exe`); ambos são necessários, não são
+   cópias do mesmo executável. Win32 usa os sufixos correspondentes `win32`.
+5. Verifica os pacotes na raiz e publica somente JSON, assinatura e página de
+   download nas pastas `updates/<edição>/v<versão>/`. Não envia uma segunda
+   cópia dos pacotes para essas pastas. Atualiza os scripts de instalação Mac
+   e, por último, os dois `latest.json` com `no-store`.
 
 O site usa os scripts do bucket para instalar o DMG correto para Intel ou Apple
 Silicon. Esses scripts verificam a equipe Apple, a assinatura e o Gatekeeper.
@@ -169,15 +174,18 @@ O workflow não sobrescreve o restante do site nem exige publicar uma nova build
 React a cada versão. As alterações iniciais do site ainda precisam do deploy
 normal do repositório `bgdesk-webpage`.
 
-Cada versão publicada é imutável. Se um push não altera uma versão já publicada,
+Os manifestos assinados e a identidade de cada versão publicada são imutáveis;
+o histórico de binários fica no GitHub Releases. No R2 os pacotes na raiz são
+substituídos pela nova versão, com `no-store`, sem acumular cópias por versão.
+Se um push não altera uma versão já publicada,
 os builds continuam rodando, mas o envio da release é pulado. Para disponibilizar
 uma correção aos usuários, aumente a versão; editar o mesmo `latest.json` não faz
 um aplicativo baixar novamente uma versão igual à instalada.
 
-Se apenas a publicação falhar, use **Re-run failed jobs** para reaproveitar os
-mesmos artefatos. Os manifestos usam a data do commit para permitir essa repetição.
-Não substitua binários versionados já enviados por um rebuild diferente: aumente
-a versão. Builds que falham não ativam os canais. Jobs são serializados para
+Se apenas a publicação falhar, use **Publish existing packages** para reaproveitar
+os mesmos artefatos. Os manifestos usam a data do commit para permitir essa repetição.
+Não associe um rebuild diferente à mesma versão: aumente a versão.
+Builds que falham não ativam os canais. Jobs são serializados para
 evitar uma execução antiga anunciar uma versão depois de outra mais recente.
 
 Os artefatos ficam disponíveis na execução por 14 dias, inclusive nos testes
@@ -290,7 +298,7 @@ Rust, Flutter ou vcpkg nem recompila.
 
 As ferramentas corrigidas de publicação vêm da `main`; versão, commit e data dos
 binários continuam sendo os do run de origem. Assim uma tentativa posterior gera
-os mesmos manifestos assinados e reaproveita objetos imutáveis já enviados ao R2.
+os mesmos manifestos assinados e reaproveita objetos com hashes idênticos no R2.
 Uma versão já anunciada só é aceita se os pacotes fornecidos forem idênticos aos
 objetos existentes. A release estável aponta para o commit que produziu os builds.
 
