@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_run:
-        description: Completed release.yml run whose five builds all passed
+        description: Completed release.yml run whose complete build matrix passed
         required: true
         type: string
 
@@ -34,7 +34,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ inputs.source_run }}
         run: python scripts/ci/publish-source.py "$SOURCE_RUN"
-      - name: Download the original ten artifact bundles
+      - name: Download the original artifact bundles
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           run-id: ${{ inputs.source_run }}
@@ -55,6 +55,17 @@ jobs:
           VERSION: ${{ steps.source.outputs.version }}
           SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
         run: python scripts/ci/r2-publish.py --version "$VERSION" --source-commit "$SOURCE_COMMIT"
+      - name: Resume Android publication preserving desktop signed metadata
+        env:
+          BGDESK_UPDATE_SIGNING_KEY: ${{ secrets.BGDESK_UPDATE_SIGNING_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_ORIGIN: ${{ vars.R2_PUBLIC_ORIGIN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+        run: python scripts/ci/publish-android.py --version "$VERSION" --source-commit "$SOURCE_COMMIT"
       - name: Publish the complete stable GitHub Release at the build commit
         env:
           GH_TOKEN: ${{ github.token }}

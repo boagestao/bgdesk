@@ -180,10 +180,10 @@ class WindowsX86Tests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'PE32'):
                 pack.main()
 
-    def test_validation_and_all_keep_five_runners_with_both_windows_architectures_serial(self):
+    def test_validation_and_all_keep_six_runners_with_both_windows_architectures_serial(self):
         jobs = plan.distribution_matrix('windows-x86')['include']
         self.assertEqual(jobs, [dict(platform='windows', arch='x86', runner='windows-2022')])
-        self.assertEqual(len(plan.distribution_matrix('all')['include']), 5)
+        self.assertEqual(len(plan.distribution_matrix('all')['include']), 6)
         windows = [t for t in plan.distribution_matrix('all')['include'] if t['platform'] == 'windows']
         self.assertEqual(windows, [dict(platform='windows', arch='x86_64', runner='windows-2022', win32=True)])
         self.assertEqual(list(plan.artifact_targets('windows')), [('windows', 'x86_64'), ('windows', 'x86')])

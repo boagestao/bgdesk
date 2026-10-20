@@ -116,13 +116,13 @@ class GitHubReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'mismatch'):
                 release.read_edition(self.manifest)
 
-    def test_stable_validates_all_26_packages_but_uploads_only_22_public_installers(self):
+    def test_stable_validates_all_28_packages_but_uploads_only_24_public_packages(self):
         from preflight import artifact_targets
         for platform, arch in artifact_targets():
             for edition in ('cliente', 'suporte'):
                 directory = self.root / f'{platform}-{arch}-{edition}'
                 directory.mkdir()
-                formats = (('exe', 'inno-exe') if platform == 'windows' else ('dmg',) if platform == 'macos'
+                formats = (('apk',) if platform == 'android' else ('exe', 'inno-exe') if platform == 'windows' else ('dmg',) if platform == 'macos'
                            else ('deb', 'rpm', 'AppImage', 'pkg.tar.zst') if arch == 'x86_64'
                            else ('deb', 'rpm', 'AppImage'))
                 records = []
@@ -140,7 +140,7 @@ class GitHubReleaseTests(unittest.TestCase):
              patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'):
             release.main()
         files = upload.call_args.args[-1]
-        self.assertEqual(len(files), 22)
+        self.assertEqual(len(files), 24)
         windows = [p for p in files if '-windows-' in p.name]
         self.assertEqual(len(windows), 4)
         self.assertTrue(all('inno-exe' in p.name for p in windows))

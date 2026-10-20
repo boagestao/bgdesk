@@ -3,23 +3,22 @@
 O workflow de distribuição é `.github/workflows/release.yml`, **BGDesk - Build and
 publish**. Cada push na `main` compila cliente e suporte do alvo selecionado. A variável
 `BGDESK_RELEASE_TARGET` controla o alvo temporário de validação; ausente ou
-`all`, ativa as cinco máquinas. Durante a validação individual
+`all`, ativa as seis máquinas. Durante a validação individual
 o deploy R2 fica desativado. Também pode executar
 manualmente, escolhendo todas as plataformas ou apenas uma, com `publish=false`
 para testar sem publicar. Publicação é permitida somente a partir da `main`.
 
-Todas as arquiteturas, incluindo Win32, passaram individualmente. A matriz mantém
-cinco máquinas e exige 26 pacotes internos das duas edições. A release pública
-tem 22 instaladores: os quatro EXEs Windows são somente Setup (32/64 bits). Um conjunto
+A matriz mantém seis máquinas e exige 28 pacotes internos das duas edições. A release pública
+tem 24 pacotes: dois APKs universais e 22 instaladores desktop; os quatro EXEs Windows são somente Setup (32/64 bits). Um conjunto
 incompleto não substitui o `latest.json`.
 
 O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
 O resultado fica em cache, pela hash de `src/flutter_ffi.rs`, do pubspec e do
 gerador, e também como artefato `flutter-bridge`. Cada plataforma baixa esse
 artefato e recusa recompilar se ele não estiver presente. Os arquivos gerados
-são os mesmos para macOS, Windows e Linux.
+são os mesmos para macOS, Windows, Linux e Android.
 
-São cinco jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
+São seis jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
 ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máquina:
 
 - macOS Apple Silicon e Intel: DMGs assinados, notarizados e verificados pelo
@@ -32,7 +31,15 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   o bundle já compilado, sem outra compilação ou runner.
   ARM64 continua usando o Flutter eLinux 3.29.3 compatível com esse ambiente.
 
-O Rust está fixado em `1.98.0`, usado na validação local. Mac e Windows leem o pin
+- Android: APK universal para ARM64 (`arm64-v8a`), ARMv7 (`armeabi-v7a`) e
+  x86_64. O cliente usa `incoming-only` no Rust e o ID
+  `br.com.boagestao.bgdeskcliente`; o suporte preserva
+  `br.com.boagestao.bgdesksuporte`. As edições compartilham a keystore existente.
+  Antes de salvar o artefato, o CI verifica os quatro `.so` de cada ABI,
+  versão `1.5.1`, versionCode `68`, application ID e certificado de assinatura.
+  O workflow Android antigo foi substituído pelo alvo `android` do `release.yml`.
+
+O Rust está fixado em `1.98.0`, usado na validação local. Mac, Windows e Android leem o pin
 de `scripts/flutter-stable-version`. Os geradores do bridge usam um SDK de
 ferramentas separado para manter compatibilidade com o analyzer do Freezed.
 Há cache de dependências nativas e de camadas Docker; o primeiro build é mais lento.
@@ -41,7 +48,7 @@ plataforma e arquitetura. As duas edições compartilham downloads e dependênci
 compiladas do Cargo; no Linux também usam a mesma imagem e os mesmos volumes
 Docker. Os artefatos de cada edição são guardados separadamente antes de iniciar
 a próxima, sem apagar o cache de compilação entre elas. A publicação continua
-exigindo os 26 arquivos internos das duas edições em todas as plataformas.
+exigindo os 28 arquivos internos das duas edições em todas as plataformas.
 
 No macOS, cada edição guarda um checkpoint fora do diretório temporário do DMG:
 `app.tar` do app compilado (links simbólicos e permissões preservados), o DMG
@@ -91,6 +98,13 @@ Secrets utilizados:
   A checagem também assina e verifica um executável mínimo para confirmar acesso
   à chave privada. O Keychain temporário entra na lista de busca durante a
   assinatura; a lista original é restaurada ao final, inclusive em caso de erro.
+- `ANDROID_SIGNING_KEY`, `ANDROID_ALIAS`, `ANDROID_KEY_STORE_PASSWORD`,
+  `ANDROID_KEY_PASSWORD`: keystore existente em Base64, alias e as duas senhas.
+  Para validar e enviar somente esses quatro Secrets, execute
+  `python3 scripts/ci/setup-github-secrets.py --android-only --apply` com JDK 17
+  no PATH. A verificação importa a chave privada temporariamente para confirmar
+  as duas senhas. O runner grava keystore e `key.properties` com modo `0600`,
+  remove ambos mesmo se o build falhar e não os inclui nos artefatos ou caches.
 - `BGDESK_UPDATE_SIGNING_KEY`: conteúdo JSON da chave privada Ed25519 existente.
   O preflight confere se corresponde à chave pública do código.
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: credenciais S3 do R2, com permissão
@@ -156,7 +170,7 @@ releases. Mudar de domínio exige manter os canais anteriores acessíveis.
 1. Atualize a versão em `Cargo.toml`, `flutter/pubspec.yaml` (preservando ou
    aumentando o número após `+`) e `libs/portable/Cargo.toml`.
 2. Faça push na `main`. Todos os builds precisam terminar com sucesso.
-3. O job de publicação confere os 26 artefatos internos esperados, seus tamanhos e
+3. O job de publicação confere os 28 artefatos internos esperados, seus tamanhos e
    hashes. O manifesto seleciona o pacote Windows nativo para atualização;
    o Inno Setup fica identificado como `inno-exe`, para download inicial.
 4. Assina os manifestos das duas edições e envia cada pacote uma única vez para
@@ -192,7 +206,13 @@ evitar uma execução antiga anunciar uma versão depois de outra mais recente.
 Os artefatos ficam disponíveis na execução por 14 dias, inclusive nos testes
 manuais sem publicação. O download Linux é publicado, mas a instalação automática
 interna continua limitada a Windows/macOS, conforme o atualizador existente.
-Windows ARM64, Android e iOS não fazem parte desta matriz de distribuição.
+Os APKs são publicados na raiz do R2 como `bgdesk-cliente-universal.apk` e
+`bgdesk-suporte-universal.apk`, compartilhados com os downloads do site. Os hashes
+assinados ficam em `updates/android/<edição>/v1.5.1/`, sem duplicar APKs nesses
+diretórios. Esse canal tem metadados próprios e preserva os metadados desktop já
+assinados. A inclusão dos APKs na release estável GitHub também preserva o tag e
+os bytes dos assets existentes. Isso não implementa instalação automática no Android.
+Windows ARM64 e iOS continuam fora desta matriz de distribuição.
 
 ## Validar antes do primeiro push de distribuição
 
@@ -200,6 +220,7 @@ Windows ARM64, Android e iOS não fazem parte desta matriz de distribuição.
 gh workflow run release.yml --ref main -f platforms=macos -f publish=false
 gh workflow run release.yml --ref main -f platforms=windows -f publish=false
 gh workflow run release.yml --ref main -f platforms=linux -f publish=false
+gh workflow run release.yml --ref main -f platforms=android -f publish=false
 ```
 
 Esses comandos exigem que o novo workflow e os scripts já tenham sido enviados
@@ -260,7 +281,7 @@ uma senha automaticamente: configure a autenticação de acesso no aplicativo.
 
 Os downloads estáveis são `https://download.bgdesk.com/bgdesk-cliente-x86_64.pkg.tar.zst`
 e `https://download.bgdesk.com/bgdesk-suporte-x86_64.pkg.tar.zst`. Ambos entram no
-manifesto assinado e na verificação de completude dos 26 arquivos antes de ativar
+manifesto assinado e na verificação de completude dos 28 arquivos antes de ativar
 os feeds. Arch Linux ARM não está incluído neste pacote x86_64.
 
 ## Validação individual e Releases imediatas
@@ -290,8 +311,8 @@ Win32 cliente e suporte passaram no run 39428395944, incluindo assinatura,
 janela Sciter e conferência dos quatro pacotes. Win32 está integrado à matriz
 `all` e à distribuição R2. A versão do aplicativo acompanha o RustDesk upstream
 (atualmente 1.5.1); não deve ser incrementada para releases próprias do BGDesk.
-A publicação existente da 1.5.1 é preservada pelo bloqueio de imutabilidade. São cinco runners,
-12 conjuntos de artefatos e 26 pacotes internos. O cache vcpkg é reconciliado
+A publicação existente da 1.5.1 é preservada pelo bloqueio de imutabilidade. São seis runners,
+14 conjuntos de artefatos e 28 pacotes internos. O cache vcpkg é reconciliado
 para cada target antes de compilar, sem confiar apenas no header FFmpeg host.
 
 Antes de preparar os compiladores, o preflight consulta as últimas 100 execuções
@@ -317,7 +338,7 @@ A release estável e os feeds já publicados não são substituídos por esse me
 O job de publicação estável, entretanto, continua obrigatório mesmo quando todos
 os pacotes forem reaproveitados e a versão já existir. O marcador de versão R2
 controla somente a publicação de novos feeds/R2. No GitHub, a sincronização de
-uma versão já publicada confere os 26 pacotes internos e os 22 downloads públicos,
+uma versão já publicada confere os 28 pacotes internos e os 24 downloads públicos,
 envia os Setups ausentes de cliente/suporte x86/x64 e remove apenas os atualizadores
 nativos correspondentes dos assets públicos. Verifica os bytes existentes antes
 de qualquer alteração e mantém o tag/commit de destino original. Não reescreve
@@ -334,8 +355,8 @@ não alteram o feed de atualização automática. Os EXEs nativos de atualizaç�
 ficam nos artefatos Actions e na raiz do R2, mas as pré-releases e a release
 estável do GitHub expõem somente Setups Windows. Os manifests e checksums
 públicos dessas pré-releases listam somente os arquivos expostos.
-Após todos os 26 pacotes internos passarem e o R2 terminar, a release estável
-`v<versão>` publica 22 arquivos, incluindo quatro Setups Windows.
+Após todos os 28 pacotes internos passarem e o R2 terminar, a release estável
+`v<versão>` publica 24 arquivos, incluindo quatro Setups Windows e dois APKs universais.
 
 A assinatura Windows informa separadamente exportação do certificado, confiança
 na CA temporária, assinatura, timestamp RFC3161 e verificação Authenticode.
@@ -353,12 +374,13 @@ de assinatura/timestamp continuam obrigatórios.
 
 ## Retomar somente a publicação
 
-Se os cinco builds passaram e apenas `publish` falhou, use **BGDesk - Publish
+Se os seis builds passaram e apenas `publish` falhou, use **BGDesk - Publish
 existing packages** (`publish-existing.yml`) e informe `source_run`. O workflow
 confere que o run de origem é da `main`, deste repositório, que encerrou e que
-todos os cinco jobs, incluindo Windows x64+x86, preflight e bridge passaram.
-Baixa os 12 conjuntos de artefatos e exige os mesmos 26 arquivos, com hashes e tamanhos válidos. Não instala
-Rust, Flutter ou vcpkg nem recompila.
+todos os seis jobs, incluindo Windows x64+x86 e Android, preflight e bridge passaram.
+Baixa os 14 conjuntos de artefatos e exige os mesmos 28 arquivos, com hashes e tamanhos válidos. Não instala
+Rust, Flutter ou vcpkg nem recompila. Runs históricos completos anteriores à inclusão
+do Android continuam permitindo recuperar somente seus pacotes desktop.
 
 As ferramentas corrigidas de publicação vêm da `main`; versão, commit e data dos
 binários continuam sendo os do run de origem. Assim uma tentativa posterior gera

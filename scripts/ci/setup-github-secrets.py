@@ -10,6 +10,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 import config_archive
+import android_signing
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -101,6 +102,7 @@ def main():
     parser.add_argument("--update-key", type=Path, default=Path.home() / ".config/bgdesk/update-signing.json")
     parser.add_argument("--config-key", type=Path, default=Path.home() / ".config/bgdesk/actions-config")
     parser.add_argument("--apply", action="store_true", help="upload; without this flag only names are shown")
+    parser.add_argument('--android-only', action='store_true', help='validate and upload only the existing Android signing identity')
     parser.add_argument("--register-config-key", action="store_true",
                         help="optional SSH deploy key; requires deploy keys to be allowed by repository policy")
     parser.add_argument("--checkout-config", action="store_true",
@@ -108,6 +110,18 @@ def main():
     parser.add_argument("--skip-config-archive", action="store_true",
                         help="use an existing repository token/SSH key instead of a configuration snapshot Secret")
     args = parser.parse_args()
+    if args.android_only:
+        secrets = android_signing.local_secrets(ROOT)
+        with tempfile.TemporaryDirectory(prefix='bgdesk-android-validate-') as temporary:
+            android_signing.validate(secrets, Path(temporary))
+        for name, value in secrets.items():
+            if len(value.encode()) > 48 * 1024:
+                raise SystemExit(f'{name}: exceeds GitHub secret size limit')
+            if args.apply:
+                subprocess.run(['gh', 'secret', 'set', name, '--repo', args.repo], input=value,
+                               text=True, check=True, stdout=subprocess.DEVNULL)
+            print(f'{name}: {"salvo no GitHub" if args.apply else "validado para envio"}')
+        return
     values = dotenv(args.env_file)
     secrets = collect(values, args.update_key.expanduser())
     if not args.skip_config_archive:

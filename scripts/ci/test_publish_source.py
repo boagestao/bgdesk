@@ -45,3 +45,7 @@ class PublishSourceTests(unittest.TestCase):
     def test_bridge_may_be_skipped_when_reusing_completed_packages(self):
         self.jobs[1]['conclusion'] = 'skipped'
         self.assertEqual(source.validate(self.run, self.jobs, 'boagestao/bgdesk'), 'a' * 40)
+
+    def test_complete_historical_desktop_run_remains_recoverable(self):
+        jobs = [job for job in self.jobs if not job['name'].startswith('android /')]
+        self.assertEqual(source.validate(self.run, jobs, 'boagestao/bgdesk'), 'a' * 40)

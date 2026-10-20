@@ -16,6 +16,7 @@ TARGETS = [
     ("windows", "x86_64", "windows-2022"),
     ("linux", "x86_64", "ubuntu-24.04"),
     ("linux", "aarch64", "ubuntu-24.04-arm"),
+    ("android", "universal", "ubuntu-24.04"),
 ]
 
 def distribution_matrix(platforms):
@@ -78,6 +79,9 @@ def main():
         required.append("BGDESK_CONFIG_ARCHIVE (or a read-only config token/SSH key)")
     if any(target['platform'] == 'macos' for target in active):
         required += ["MACOS_P12_BASE64", "MACOS_P12_PASSWORD", "MACOS_NOTARY_APPLE_ID", "MACOS_NOTARY_PASSWORD"]
+    if any(target['platform'] == 'android' for target in active):
+        from android_signing import NAMES
+        required += list(NAMES)
     if publish:
         required += ["BGDESK_UPDATE_SIGNING_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
                      "R2_ACCOUNT_ID", "R2_BUCKET", "R2_PUBLIC_ORIGIN"]

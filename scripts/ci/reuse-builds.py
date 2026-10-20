@@ -162,8 +162,8 @@ def restore(repository, run_id, commit, version, platform, arch):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan', action='store_true')
-    parser.add_argument('--platform', choices=('linux', 'macos', 'windows'))
-    parser.add_argument('--arch', choices=('x86', 'x86_64', 'aarch64'))
+    parser.add_argument('--platform', choices=('linux', 'macos', 'windows', 'android'))
+    parser.add_argument('--arch', choices=('x86', 'x86_64', 'aarch64', 'universal'))
     parser.add_argument('--run')
     parser.add_argument('--commit')
     args = parser.parse_args()

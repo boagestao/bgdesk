@@ -570,37 +570,20 @@ buildAndroid()
     ensure_cargo
     ensure_android_ndk
     export FLUTTER_ROOT="${FLUTTER_ROOT:-$ROOT/.tools/flutter-stable}"
-    export PATH="$FLUTTER_ROOT/bin:/opt/homebrew/opt/openjdk@17/bin:$PATH"
-    export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}"
+    export PATH="$FLUTTER_ROOT/bin:$PATH"
+    if [[ -z "${JAVA_HOME:-}" && -d /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ]]; then
+      export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+      export PATH="$JAVA_HOME/bin:$PATH"
+    fi
+    export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
     ensure_bridge
     export VCPKG_ROOT="${VCPKG_ROOT:-$HOME/.bin/vcpkg}"
-    if [[ ! -f "$VCPKG_ROOT/installed/arm64-android/include/libavutil/attributes.h" ]]; then
-      echo "[build] instalando dependências vcpkg para Android (arm64-v8a)..."
-      ./flutter/build_android_deps.sh arm64-v8a
+    if [[ -n "${ANDROID_SIGNING_KEY:-}" ]]; then
+      "$PYTHON" scripts/ci/android_signing.py
+    else
+      ensure_android_signing
     fi
-    TARGET=aarch64-linux-android
-    echo "Building Android"
-    ./flutter/ndk_arm64.sh
-    mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
-    cp "./target/$TARGET/release/liblibrustdesk.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
-
-    ensure_android_signing
-
-    cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$ANDROID_NDK_HOST_TAG/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/
-    local ANDROID_OUT_DIR ANDROID_MODE ANDROID_APK_NAME
-    ANDROID_OUT_DIR="$(bgdesk_build_out_dir android universal)"
-    ANDROID_MODE="$(bgdesk_build_mode)"
-    ANDROID_APK_NAME="bgdesk-${ANDROID_MODE}-universal.apk"
-    bgdesk_prepare_build_out_dir "$ANDROID_OUT_DIR"
-    pushd flutter >/dev/null
-    # Sempre APK universal (fat), nunca --split-per-abi
-    flutter build apk --release
-    cp build/app/outputs/flutter-apk/app-release.apk "../${ANDROID_OUT_DIR}/${ANDROID_APK_NAME}"
-    popd >/dev/null
-    echo ""
-    echo "=== Build Android concluído ==="
-    echo "Pasta: $ROOT/$ANDROID_OUT_DIR/"
-    ls -la "$ANDROID_OUT_DIR/${ANDROID_APK_NAME}" 2>/dev/null || true
+    bash scripts/build-android.sh
 }
 
 # ./build.sh --build-bridges — só regenera o bridge (sem build de plataforma)

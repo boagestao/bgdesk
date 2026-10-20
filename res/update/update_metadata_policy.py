@@ -111,6 +111,8 @@ def root_artifact_name(edition, platform, arch, file_format):
     if edition not in ("cliente", "suporte"):
         raise ValueError("Invalid artifact edition")
     prefix = f"bgdesk-{edition}"
+    if platform == "android" and arch == "universal" and file_format == "apk":
+        return f"{prefix}-universal.apk"
     if platform == "linux" and arch in ("x86_64", "aarch64"):
         if file_format in ("deb", "rpm", "AppImage") or (arch == "x86_64" and file_format == "pkg.tar.zst"):
             return f"{prefix}-{arch}.{file_format}"

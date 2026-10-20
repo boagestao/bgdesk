@@ -72,17 +72,17 @@ class ReleaseToolsTests(unittest.TestCase):
         site, records = self.root_packages()
         s3, verified = FakeS3(), []
         def verify(origin, key, path, small=False):
-            if len(verified) < 26:
-                self.assertEqual(len(s3.writes), 26)
+            if len(verified) < 28:
+                self.assertEqual(len(s3.writes), 28)
                 self.assertNotIn('/', key)
             verified.append(key)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
                    verify=verify, root_artifacts=True)
-        packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst'))]
-        self.assertEqual(len(packages), 26)
+        packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst', '.apk'))]
+        self.assertEqual(len(packages), 28)
         self.assertTrue(all('/' not in key for key in packages))
         self.assertTrue(all(s3.objects[key]['cache'] == 'no-store, max-age=0' for key in packages))
-        self.assertEqual(set(packages), set(verified[:26]))
+        self.assertEqual(set(packages), set(verified[:28]))
         self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
         writes = len(s3.writes)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
@@ -110,7 +110,7 @@ class ReleaseToolsTests(unittest.TestCase):
         for edition in ('cliente', 'suporte'):
             names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'exe'))
             names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'inno-exe'))
-        self.assertEqual(len(names), 26)
+        self.assertEqual(len(names), 28)
         self.assertIn('bgdesk-cliente-win32.exe', names)
         self.assertIn('bgdesk-cliente-update-win32.exe', names)
 
@@ -288,7 +288,7 @@ class ReleaseToolsTests(unittest.TestCase):
                                     format=fmt, version="1.5.2", file_name=name, size=10,
                                     sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
             (directory / "artifacts.json").write_text(json.dumps(records))
-        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 26)
+        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 28)
         chosen = next(self.root.glob("*/artifacts.json"))
         saved = chosen.read_bytes()
         chosen.unlink()
@@ -349,11 +349,11 @@ class ReleaseToolsTests(unittest.TestCase):
         targets = plan.distribution_matrix('all')['include']
         self.assertEqual({(target['platform'], target['arch']) for target in targets}, {
             ('macos', 'aarch64'), ('macos', 'x86_64'), ('windows', 'x86_64'),
-            ('linux', 'aarch64'), ('linux', 'x86_64'),
+            ('linux', 'aarch64'), ('linux', 'x86_64'), ('android', 'universal'),
         })
-        self.assertEqual(len(targets), 5)
+        self.assertEqual(len(targets), 6)
         self.assertTrue(all('edition' not in target for target in targets))
-        for platform, count in (('macos', 2), ('windows', 1), ('linux', 2)):
+        for platform, count in (('macos', 2), ('windows', 1), ('linux', 2), ('android', 1)):
             with self.subTest(platform=platform):
                 selected = plan.distribution_matrix(platform)['include']
                 self.assertEqual(len(selected), count)
@@ -390,7 +390,7 @@ class ReleaseToolsTests(unittest.TestCase):
                     str(artifacts / f'build-{platform}-{arch}-{edition}'),
                 ], cwd=self.root, check=True)
         records = r2.read_records(artifacts, '1.5.2')
-        self.assertEqual(len(records), 26)
+        self.assertEqual(len(records), 28)
         for record, path in records:
             self.assertEqual(path.read_bytes(),
                              f"{record['platform']}/{record['arch']}/{record['edition']}/{record['format']}".encode())

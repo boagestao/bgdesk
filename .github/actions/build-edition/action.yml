@@ -124,6 +124,13 @@ runs:
       env:
         EDITION: ${{ inputs.edition }}
       run: bash scripts/package-arch-linux.sh "$EDITION"
+    - name: Build and verify signed universal Android APK
+      if: inputs.platform == 'android'
+      shell: bash
+      run: |
+        args=(android)
+        [[ "$BGDESK_CLIENTE" == 0 ]] || args=(cliente android)
+        bash build.sh "${args[@]}"
     - name: Collect and validate expected artifacts
       shell: bash
       env:

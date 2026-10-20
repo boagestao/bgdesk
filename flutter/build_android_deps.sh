@@ -58,9 +58,13 @@ echo "INFO: Building and install vcpkg dependencies for Android ${ANDROID_ABI} .
 
 pushd "${SCRIPTDIR}/.."
 
+clean_args=()
+if [[ "${VCPKG_CLEAN_AFTER_BUILD:-0}" == 1 ]]; then
+	clean_args+=(--clean-after-build)
+fi
 "${VCPKG_ROOT}/vcpkg" install \
 	--triplet "${VCPKG_TARGET}" \
-	--x-install-root="${VCPKG_ROOT}/installed"
+	--x-install-root="${VCPKG_ROOT}/installed" "${clean_args[@]}"
 
 popd
 
@@ -73,7 +77,7 @@ if [ "${ANDROID_ABI}" = 'armeabi-v7a' ]; then
 	if [ -d "${VCPKG_ROOT}/installed/arm-neon-android" ]; then
 		echo 'INFO: Symlinking arm-neon-android to arm-android'
 
-		ln -sf \
+		ln -sfn \
 			"${VCPKG_ROOT}/installed/arm-neon-android" \
 			"${VCPKG_ROOT}/installed/arm-android"
 

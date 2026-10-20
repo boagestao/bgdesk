@@ -9,6 +9,10 @@ import tomllib
 
 
 def specs(platform, arch, edition):
+    if platform == "android":
+        if arch != "universal":
+            raise ValueError("Android distribution requires a universal APK")
+        return [("apk", Path(f"build/android-universal-{edition}/bgdesk-{edition}-universal.apk"))]
     if platform == "macos":
         return [("dmg", Path(f"build/macOS-{arch}-{edition}/bgdesk-{edition}-darwin.dmg"))]
     if platform == "windows":
@@ -25,8 +29,8 @@ def specs(platform, arch, edition):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("platform", choices=("macos", "windows", "linux"))
-    parser.add_argument("arch", choices=("aarch64", "x86_64", "x86"))
+    parser.add_argument("platform", choices=("macos", "windows", "linux", "android"))
+    parser.add_argument("arch", choices=("aarch64", "x86_64", "x86", "universal"))
     parser.add_argument("edition", choices=("cliente", "suporte"))
     parser.add_argument("--output", type=Path, default=Path("release-artifacts"))
     args = parser.parse_args()

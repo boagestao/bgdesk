@@ -17,6 +17,9 @@ def validate(run, jobs, repository):
             or run.get('head_repository', {}).get('full_name') != repository):
         raise ValueError('Source must be a completed main release run from this repository')
     expected = complete_build_job_names()
+    # Runs predating Android still support recovery of their complete desktop set.
+    if not any(job['name'] == 'android / universal (cliente + suporte)' for job in jobs):
+        expected.discard('android / universal (cliente + suporte)')
     expected |= {'preflight', 'flutter bridge'}
     selected = [job for job in jobs if job['name'] != 'publish']
     if len(selected) != len(expected) or {job['name'] for job in selected} != expected:
@@ -56,7 +59,7 @@ def main():
         raise ValueError('Source version differs from the current publication tools; refusing to mix releases')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
         handle.write(f'commit={commit}\nversion={version}\n')
-    print(f'All five source jobs, including Windows x64+x86, passed; reusing BGDesk {version} from {commit[:12]}')
+    print(f'All source jobs, including Windows x64+x86 and Android, passed; reusing BGDesk {version} from {commit[:12]}')
 
 
 if __name__ == '__main__':

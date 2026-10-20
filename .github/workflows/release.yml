@@ -8,7 +8,7 @@ on:
       platforms:
         description: Platforms to validate (publishing requires all)
         type: choice
-        options: [all, macos, windows, linux, macos-aarch64, macos-x86_64, linux-x86_64, linux-aarch64, windows-x86_64, windows-x86]
+        options: [all, macos, windows, linux, macos-aarch64, macos-x86_64, linux-x86_64, linux-aarch64, windows-x86_64, windows-x86, android, android-universal]
         default: all
       publish:
         description: Publish a new Cargo.toml version to R2 after all builds pass
@@ -67,6 +67,10 @@ jobs:
           MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           BGDESK_UPDATE_SIGNING_KEY: ${{ secrets.BGDESK_UPDATE_SIGNING_KEY }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -158,6 +162,10 @@ jobs:
       contents: write
       actions: read
     env:
+      ANDROID_SIGNING_KEY: ${{ matrix.platform == 'android' && secrets.ANDROID_SIGNING_KEY || '' }}
+      ANDROID_ALIAS: ${{ matrix.platform == 'android' && secrets.ANDROID_ALIAS || '' }}
+      ANDROID_KEY_STORE_PASSWORD: ${{ matrix.platform == 'android' && secrets.ANDROID_KEY_STORE_PASSWORD || '' }}
+      ANDROID_KEY_PASSWORD: ${{ matrix.platform == 'android' && secrets.ANDROID_KEY_PASSWORD || '' }}
       BGDESK_REQUIRE_BRIDGE: '1'
       BGDESK_VERSION: ${{ needs.preflight.outputs.version }}
       BGDESK_CHECKPOINT_ORIGIN: ${{ github.sha }}
@@ -301,11 +309,29 @@ jobs:
       - name: Configure Win32 dependencies without Flutter
         if: matrix.needs_build && (runner.os == 'Windows' && matrix.arch == 'x86')
         run: bash scripts/ci/setup-windows-x86.sh
+      - name: Install Flutter for Android
+        if: matrix.needs_build && matrix.platform == 'android'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ needs.preflight.outputs.flutter_version }}
+      - name: Set up Android toolchain and validate release signing
+        if: matrix.needs_build && matrix.platform == 'android'
+        run: bash scripts/ci/setup-android.sh
+      - name: Cache Android native dependencies
+        if: matrix.needs_build && matrix.platform == 'android'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-native-v1-${{ runner.os }}-r28c-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**', 'res/vcpkg-triplets/**', 'flutter/android/**/*.gradle', 'flutter/android/gradle/wrapper/gradle-wrapper.properties') }}
       - name: Set up Linux image cache
-        if: matrix.needs_build && (runner.os == 'Linux')
+        if: matrix.needs_build && matrix.platform == 'linux'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build Linux environment
-        if: matrix.needs_build && (runner.os == 'Linux')
+        if: matrix.needs_build && matrix.platform == 'linux'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -345,6 +371,11 @@ jobs:
       - name: Build, sign, and save Win32 on the same Windows runner
         if: runner.os == 'Windows' && matrix.win32 && matrix.win32_reuse_run == ''
         uses: ./.github/actions/build-windows-x86-pair
+      - name: Remove temporary Android signing files
+        if: always() && matrix.platform == 'android'
+        run: |
+          rm -f flutter/android/key.properties
+          rm -rf "$RUNNER_TEMP/bgdesk-android-signing"
       - name: Remove temporary macOS certificate
         if: always() && runner.os == 'macOS'
         run: rm -f "$RUNNER_TEMP/bgdesk-distribution.p12"
@@ -378,6 +409,15 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: python scripts/ci/r2-publish.py --version '${{ needs.preflight.outputs.version }}'
+      - name: Publish Android downloads without changing existing desktop metadata
+        env:
+          BGDESK_UPDATE_SIGNING_KEY: ${{ secrets.BGDESK_UPDATE_SIGNING_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_ORIGIN: ${{ vars.R2_PUBLIC_ORIGIN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python scripts/ci/publish-android.py --version '${{ needs.preflight.outputs.version }}'
       - name: Publish or complete stable GitHub Release, including both Windows editions
         env:
           GH_TOKEN: ${{ github.token }}

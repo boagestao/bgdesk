@@ -65,7 +65,7 @@ def upload(s3, bucket, path, key, immutable=True, metadata=None):
         raise ValueError(f"R2 verification failed for {key}")
 
 
-def read_records(artifacts, version):
+def read_records(artifacts, version, *, include_android=True):
     records = []
     seen = set()
     for manifest in artifacts.glob("*/artifacts.json"):
@@ -90,11 +90,16 @@ def read_records(artifacts, version):
             ("windows", "x86", ("exe", "inno-exe")),
             ("linux", "x86_64", ("deb", "rpm", "AppImage", "pkg.tar.zst")),
             ("linux", "aarch64", ("deb", "rpm", "AppImage")),
+            ("android", "universal", ("apk",)),
         ) for fmt in formats
     }
+    android = {(e, 'android', 'universal', 'apk') for e in ('cliente', 'suporte')}
+    # Historical desktop-only runs remain valid for publication recovery.
+    if not any(selector[1] == 'android' for selector in seen):
+        expected -= android
     if seen != expected:
         raise ValueError(f"Incomplete release; missing={sorted(expected - seen)}, extra={sorted(seen - expected)}")
-    return records
+    return records if include_android else [(r, p) for r, p in records if r["platform"] != "android"]
 
 
 def public_check(origin, key, path, small=False):
@@ -183,7 +188,7 @@ def main():
             handle.write(f"new_release={str(not published).lower()}\n")
         print("Version already published; builds will run without announcing it again." if published else "New version: release will be published after all builds pass.")
         return
-    records = read_records(args.artifacts, args.version)
+    records = read_records(args.artifacts, args.version, include_android=False)
     source_commit = args.source_commit or subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
