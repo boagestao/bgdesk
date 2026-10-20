@@ -346,6 +346,8 @@ commit e run originais. Reaproveitar esses pacotes não cria nem altera releases
 ou tags: a publicação original continua como referência, sem duplicar os mesmos
 binários em uma nova pré-release.
 Se todos os alvos forem reaproveitados, até a geração do bridge é pulada.
+O job de publicação usa `always()` com sucesso explícito de preflight e build,
+para que esse bridge pulado não impeça a publicação da matriz reaproveitada.
 A release estável e os feeds já publicados não são substituídos por esse mecanismo.
 O job de publicação estável, entretanto, continua obrigatório mesmo quando todos
 os pacotes forem reaproveitados e a versão já existir. O marcador de versão R2
