@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -44,6 +45,34 @@ class GitHubReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'another commit'):
                 release.ensure_release('owner/repo', 'tag', 'new-commit', 'title', 'notes', draft=False)
         gh.assert_not_called()
+
+    def test_draft_on_a_later_page_is_reused_after_the_tag_endpoint_returns_404(self):
+        draft = {'id': 123, 'tag_name': 'v1.5.1', 'draft': True, 'target_commitish': 'a' * 40, 'assets': []}
+        responses = [subprocess.CompletedProcess([], 1, '', 'gh: Not Found (HTTP 404)'),
+                     subprocess.CompletedProcess([], 0, json.dumps([[{'tag_name': 'other'}], [draft]]), '')]
+        with patch.object(release, 'gh', side_effect=responses) as gh:
+            found = release.ensure_release('owner/repo', 'v1.5.1', 'a' * 40, 'title', 'notes', draft=True)
+        self.assertEqual(found, draft)
+        self.assertEqual(gh.call_count, 2)  # No second draft is created on resume.
+        self.assertEqual(gh.call_args.args, ('api', '--paginate', '--slurp',
+                                           'repos/owner/repo/releases?per_page=100'))
+
+    def test_new_draft_is_found_without_a_published_git_tag(self):
+        draft = {'target_commitish': 'a' * 40, 'draft': True, 'assets': []}
+        with patch.object(release, 'release', side_effect=[None, draft]), patch.object(release, 'gh') as gh:
+            self.assertEqual(release.ensure_release('owner/repo', 'tag', 'a' * 40, 'title', 'notes', draft=True), draft)
+        self.assertIn('--draft', gh.call_args.args)
+
+    def test_missing_created_release_reports_a_clear_error(self):
+        with patch.object(release, 'release', return_value=None), patch.object(release, 'gh'):
+            with self.assertRaisesRegex(RuntimeError, 'cannot be found'):
+                release.ensure_release('owner/repo', 'tag', 'a' * 40, 'title', 'notes', draft=True)
+
+    def test_query_errors_other_than_not_found_do_not_create_another_release(self):
+        with patch.object(release, 'gh', return_value=subprocess.CompletedProcess([], 1, '', 'HTTP 403')) as gh:
+            with self.assertRaisesRegex(RuntimeError, 'Cannot query'):
+                release.ensure_release('owner/repo', 'tag', 'a' * 40, 'title', 'notes', draft=True)
+        self.assertEqual(gh.call_count, 1)
 
     def test_stable_release_requires_the_entire_artifact_matrix(self):
         with patch('sys.argv', ['release', '--stable', '--version', '1.5.1', '--artifacts', str(self.root),

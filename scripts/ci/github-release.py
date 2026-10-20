@@ -46,7 +46,14 @@ def release(repository, tag):
     if result.returncode == 0:
         return json.loads(result.stdout)
     if '404' in result.stderr:
-        return None
+        # The tag endpoint only returns published releases. Authenticated lists
+        # include drafts, which must be reused when resuming a stable upload.
+        pages = json.loads(gh('api', '--paginate', '--slurp',
+                              f'repos/{repository}/releases?per_page=100').stdout)
+        matches = [item for page in pages for item in page if item['tag_name'] == tag]
+        if len(matches) > 1:
+            raise ValueError('Multiple releases have the same tag; refusing an ambiguous upload')
+        return matches[0] if matches else None
     raise RuntimeError('Cannot query GitHub release: ' + result.stderr)
 
 
@@ -60,6 +67,8 @@ def ensure_release(repository, tag, commit, title, notes, *, draft):
                '--title', title, '--notes-file', str(body), '--latest=false',
                '--draft' if draft else '--prerelease')
         existing = release(repository, tag)
+    if existing is None:
+        raise RuntimeError('Created GitHub release cannot be found; refusing to upload packages')
     if existing['target_commitish'] != commit:
         raise ValueError('Release tag belongs to another commit; refusing to mix binaries')
     return existing
