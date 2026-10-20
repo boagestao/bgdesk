@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 source scripts/build-out-dir.sh
+python3 scripts/patch-android-plugins.py
 features=flutter,hwcodec
 [[ "${BGDESK_CLIENTE:-0}" != 1 ]] || features+=,incoming-only
 out="$(bgdesk_build_out_dir android universal)"

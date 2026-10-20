@@ -319,14 +319,17 @@ jobs:
         if: matrix.needs_build && matrix.platform == 'android'
         run: bash scripts/ci/setup-android.sh
       - name: Cache Android native dependencies
+        id: android-cache
         if: matrix.needs_build && matrix.platform == 'android'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/vcpkg/archives
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: android-native-v1-${{ runner.os }}-r28c-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**', 'res/vcpkg-triplets/**', 'flutter/android/**/*.gradle', 'flutter/android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: android-native-v2-${{ runner.os }}-r28c-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**', 'res/vcpkg-triplets/**', 'flutter/android/**/*.gradle', 'flutter/android/gradle/wrapper/gradle-wrapper.properties') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            android-native-v2-${{ runner.os }}-r28c-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**', 'res/vcpkg-triplets/**', 'flutter/android/**/*.gradle', 'flutter/android/gradle/wrapper/gradle-wrapper.properties') }}-
       - name: Set up Linux image cache
         if: matrix.needs_build && matrix.platform == 'linux'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -371,6 +374,15 @@ jobs:
       - name: Build, sign, and save Win32 on the same Windows runner
         if: runner.os == 'Windows' && matrix.win32 && matrix.win32_reuse_run == ''
         uses: ./.github/actions/build-windows-x86-pair
+      - name: Preserve Android dependency caches even after packaging failure
+        if: always() && matrix.needs_build && matrix.platform == 'android' && steps.android-cache.outcome == 'success'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.android-cache.outputs.cache-primary-key }}
       - name: Remove temporary Android signing files
         if: always() && matrix.platform == 'android'
         run: |

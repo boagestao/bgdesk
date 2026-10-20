@@ -38,6 +38,12 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   Antes de salvar o artefato, o CI verifica os quatro `.so` de cada ABI,
   versão `1.5.1`, versionCode `68`, application ID e certificado de assinatura.
   O workflow Android antigo foi substituído pelo alvo `android` do `release.yml`.
+  O `uni_links` fixado já usa o embedding v2; `scripts/patch-android-plugins.py`
+  remove somente seu método estático legado `registerWith(Registrar)`, incompatível
+  com o Flutter atual, depois do `pub get`. Os handlers v2 de engine, activity e
+  deep links são preservados. O patch é idempotente e recusa alterações inesperadas
+  no método legado. As dependências vcpkg/Gradle são salvas em cache mesmo se uma
+  etapa posterior de empacotamento falhar; chaves e `key.properties` ficam fora dele.
 
 O Rust está fixado em `1.98.0`, usado na validação local. Mac, Windows e Android leem o pin
 de `scripts/flutter-stable-version`. Os geradores do bridge usam um SDK de

@@ -26,6 +26,9 @@ def module(name):
 
 verify = module('verify-android')
 publish = module('publish-android')
+patch_spec = importlib.util.spec_from_file_location('patch_android_plugins', Path(__file__).parents[1] / 'patch-android-plugins.py')
+patch_plugins = importlib.util.module_from_spec(patch_spec)
+patch_spec.loader.exec_module(patch_plugins)
 
 
 class FakeS3:
@@ -49,6 +52,15 @@ class AndroidTests(unittest.TestCase):
 
     def test_properties_escape_password_characters_and_unicode(self):
         self.assertEqual(android_signing.escape_property(' a\\b:=#!\nç'), r'\ a\\b\:\=\#\!\n\u00e7')
+
+    def test_legacy_registration_patch_preserves_v2_handlers_and_is_idempotent(self):
+        v2 = 'implements FlutterPlugin, ActivityAware, PluginRegistry.NewIntentListener {\n' + 'void onAttachedToEngine() {}\nvoid onAttachedToActivity() {}\nvoid onNewIntent() {}\n'
+        source = v2 + patch_plugins.LEGACY + '}\n'
+        patched = patch_plugins.patch_source(source)
+        self.assertEqual(patched, v2 + '}\n')
+        self.assertEqual(patch_plugins.patch_source(patched), patched)
+        with self.assertRaisesRegex(ValueError, 'legacy registration changed'):
+            patch_plugins.patch_source(source.replace('registrar.activity() == null', 'registrar.activity() != null'))
 
     def test_failed_private_key_validation_is_sanitized(self):
         values = dict(zip(android_signing.NAMES, (base64.b64encode(b'fake').decode(), 'alias', 'store-secret', 'key-secret')))
