@@ -123,15 +123,34 @@ jobs:
             flutter/lib/generated_bridge.freezed.dart
             flutter/macos/Runner/bridge_generated.h
             flutter/ios/Runner/bridge_generated.h
-          key: flutter-bridge-v1-${{ hashFiles('src/flutter_ffi.rs', 'flutter/pubspec.yaml', 'flutter/pubspec.lock', 'scripts/generate-bridge.sh', 'scripts/flutter-stable-version') }}
+          # Only FFI input and the generator (codegen + Freezed SDK pins). App
+          # version, pubspec and the stable app Flutter SDK must not regenerate.
+          key: flutter-bridge-v2-${{ hashFiles('src/flutter_ffi.rs', 'scripts/generate-bridge.sh') }}
+      - name: Restore bridge codegen tools
+        id: bridge-tools
+        if: steps.bridge-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo
+            .tools/flutter-stable
+            .tools/flutter-bridge-tools
+          key: flutter-bridge-tools-v1-${{ env.RUST_VERSION }}-expand1.0.95-${{ hashFiles('scripts/generate-bridge.sh', 'scripts/flutter-stable-version') }}
       - name: Install bridge tools
         if: steps.bridge-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake curl git libclang-dev llvm pkg-config unzip xz-utils
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          if [[ '${{ steps.bridge-tools.outputs.cache-hit }}' == 'true' ]]; then
+            # Cached rustup/cargo still need env on a fresh runner.
+            # shellcheck source=/dev/null
+            source "$HOME/.cargo/env"
+            exit 0
+          fi
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_VERSION" --profile minimal --component rustfmt
           source "$HOME/.cargo/env"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           cargo install cargo-expand --version 1.0.95 --locked
       - name: Generate bridge once
         if: steps.bridge-cache.outputs.cache-hit != 'true'

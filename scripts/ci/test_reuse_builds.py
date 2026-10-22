@@ -133,6 +133,18 @@ class ReuseBuildTests(unittest.TestCase):
         self.assertTrue(target['needs_build'])
         self.assertEqual(target['reuse_run'], '')
 
+    def test_bridge_cache_reuses_generated_files_until_ffi_or_generator_changes(self):
+        workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/release.yml').read_text()
+        job = workflow.split('name: flutter bridge', 1)[1].split('\n  build:', 1)[0]
+        self.assertIn("hashFiles('src/flutter_ffi.rs', 'scripts/generate-bridge.sh')", job)
+        self.assertIn('flutter-bridge-v2-', job)
+        self.assertIn('Restore bridge codegen tools', job)
+        self.assertIn('expand1.0.95', job)
+        self.assertNotIn('pubspec.yaml', job)
+        self.assertNotIn('pubspec.lock', job)
+        generated_key = job.split('key: flutter-bridge-v2-', 1)[1].split('\n', 1)[0]
+        self.assertNotIn('flutter-stable-version', generated_key)
+
     def test_bare_app_mislabeled_as_setup_is_rejected_even_with_correct_hash(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

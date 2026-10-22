@@ -14,10 +14,14 @@ tem 23 pacotes: dois APKs universais e 21 instaladores desktop; os três EXEs Wi
 incompleto não substitui o `latest.json`.
 
 O bridge Flutter–Rust é gerado uma vez, num job Ubuntu anterior às compilações.
-O resultado fica em cache, pela hash de `src/flutter_ffi.rs`, do pubspec e do
-gerador, e também como artefato `flutter-bridge`. Cada plataforma baixa esse
-artefato e recusa recompilar se ele não estiver presente. Os arquivos gerados
-são os mesmos para macOS, Windows, Linux e Android.
+O resultado fica em cache pela hash de `src/flutter_ffi.rs` e
+`scripts/generate-bridge.sh` (versão do codegen e do Flutter 3.44.4 do Freezed),
+e também como artefato `flutter-bridge`. Versão do aplicativo, pubspec e o SDK
+estável do app não invalidam esse cache. O toolchain de codegen (Rust,
+cargo-expand, Flutter estável e Flutter 3.44.4) tem cache próprio, usado só
+quando o FFI ou o gerador mudam. Cada plataforma baixa o artefato e recusa
+recompilar se ele não estiver presente. Os arquivos gerados são os mesmos para
+macOS, Windows, Linux e Android.
 
 São seis jobs paralelos, em máquinas nativas do GitHub. Cada job prepara o
 ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máquina:
