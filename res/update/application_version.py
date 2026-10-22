@@ -17,7 +17,7 @@ def base_version(version):
 
 
 def package_version(version):
-    """Numeric native package version (RPM/Arch/macOS), distinct from build ID."""
+    """Numeric native package version (Inno/RPM/Arch/macOS), distinct from build ID."""
     return '.'.join(map(str, parse_version(version)))
 
 

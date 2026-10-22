@@ -94,14 +94,11 @@ fi
 mkdir -p "$WIN_OUT_DIR"
 log "compilando $INSTALLER_BASE.exe ..."
 APP_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
+# Read versions through ISPP GetEnv to avoid command-line quoting/MSYS conversion.
 NUMERIC_VERSION="$(python3 "$ROOT/res/update/application_version.py" "$APP_VERSION")"
-# Git Bash otherwise turns /D... into D:\... paths. Quoted values keep 1.5.1-1 a
-# string: ISCC treats '-' as a switch prefix, and ISPP would subtract otherwise.
-MSYS2_ARG_CONV_EXCL='/DBuildArch=;/DAppVersion=;/DNumericVersion=' \
-  "$ISCC" "$ISS_FILE" \
-  "/DBuildArch=${WIN_ARCH}" \
-  "/DAppVersion=\"${APP_VERSION}\"" \
-  "/DNumericVersion=\"${NUMERIC_VERSION}\""
+BGDESK_APP_VERSION="$APP_VERSION" BGDESK_NUMERIC_VERSION="$NUMERIC_VERSION" \
+MSYS2_ARG_CONV_EXCL='/DBuildArch=' \
+  "$ISCC" "$ISS_FILE" "/DBuildArch=${WIN_ARCH}"
 
 if [[ ! -f "$INSTALLER_OUT" ]]; then
   echo "[installer] ERRO: saída esperada não encontrada: $INSTALLER_OUT" >&2
