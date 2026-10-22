@@ -221,6 +221,11 @@ class WindowsX86Tests(unittest.TestCase):
         iscc = compiler / 'ISCC.exe'
         iscc.write_text('''#!/bin/bash
 set -eu
+# Real ISCC treats an unquoted hyphen in /D values as a new switch.
+if [[ -n "${5:-}" || "$3" != /DAppVersion=\\\"*\\\" || "$4" != /DNumericVersion=\\\"*\\\" ]]; then
+  printf '%s\\n' 'Usage:  iscc [options] scriptfile.iss' >&2
+  exit 1
+fi
 edition="$(basename "$1" .iss)"
 arch="${2#/DBuildArch=}"
 case "$arch" in x86) suffix=win32;; x86_64) suffix=win64;; *) exit 99;; esac
@@ -238,7 +243,9 @@ printf '%s\\n' "$2" "$3" "$4" > compiler-arguments
                                cwd=self.root, env=dict(os.environ, INNO_SETUP_DIR=str(compiler)),
                                check=True, capture_output=True)
                 self.assertEqual((self.root / 'compiler-arguments').read_text().splitlines(),
-                                 ['/DBuildArch='+arch, '/DAppVersion=1.5.1-1', '/DNumericVersion=1.5.1.1'])
+                                 ['/DBuildArch='+arch,
+                                  '/DAppVersion="1.5.1-1"',
+                                  '/DNumericVersion="1.5.1.1"'])
 
 
 if __name__ == '__main__':

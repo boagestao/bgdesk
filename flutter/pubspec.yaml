@@ -128,6 +128,9 @@ dev_dependencies:
 dependency_overrides:
   intl: ^0.19.0
   flutter_plugin_android_lifecycle: ^2.0.33
+  # 2.12.2 converted the native player to Swift with isolation: arguments that
+  # Xcode 16.4 / macOS 15.5 SDK rejects. dash_chat_2 pulls video_player ^2.2.5.
+  video_player_avfoundation: 2.12.1
 
 # rerun: flutter pub run flutter_launcher_icons
 flutter_icons:
