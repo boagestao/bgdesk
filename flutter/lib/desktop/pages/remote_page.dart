@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
@@ -44,6 +45,7 @@ class RemotePage extends StatefulWidget {
     this.display,
     this.displays,
     this.tabController,
+    this.tabKey,
     this.switchUuid,
     this.forceRelay,
     this.isSharedPassword,
@@ -52,6 +54,7 @@ class RemotePage extends StatefulWidget {
   }
 
   final String id;
+  final String? tabKey;
   final SessionID? sessionId;
   final int? tabWindowId;
   final int? display;
@@ -65,6 +68,10 @@ class RemotePage extends StatefulWidget {
   final DesktopTabController? tabController;
 
   FFI get ffi => (_lastState.value! as _RemotePageState)._ffi;
+  FFI? get initializedFfi => (_lastState.value as _RemotePageState?)?._ffi;
+
+  void deactivateInput() =>
+      (_lastState.value as _RemotePageState?)?._deactivateInput();
 
   void releaseMacOSInputForTabTransfer() {
     if (!isMacOS) return;
@@ -85,6 +92,7 @@ class _RemotePageState extends State<RemotePage>
     with
         AutomaticKeepAliveClientMixin,
         MultiWindowListener,
+        WindowListener,
         WidgetsBindingObserver,
         TickerProviderStateMixin {
   Timer? _timer;
@@ -107,6 +115,7 @@ class _RemotePageState extends State<RemotePage>
   final _macOSFullScreenFocusRecovery = MacOSFullScreenFocusRecovery();
   bool _macOSExplicitFocusRequestPending = false;
   StreamSubscription<DesktopTabState>? _tabStateSubscription;
+  bool _wasSelectedTab = false;
   final _cursorOverImage = false.obs;
   late RxBool _showRemoteCursor;
   late RxBool _zoomCursor;
@@ -149,14 +158,30 @@ class _RemotePageState extends State<RemotePage>
   void initState() {
     super.initState();
     _ffi = FFI(widget.sessionId);
+    _ffi.tabKey = widget.tabKey;
+    _ffi.inputModel.isSessionSelected = () => mounted && _isSelectedTab;
+    if (widget.tabController != null) {
+      _ffi.inputModel.sessionSelectionGeneration =
+          () => widget.tabController!.selectionGeneration;
+    }
+    _ffi.shortcutModel.isSessionSelected = () => mounted && _isSelectedTab;
+    if (usesUnifiedSessionTabs) windowManager.addListener(this);
     if (isMacOS) {
       // SchedulerBinding.instance.lifecycleState is null in the first connection in a new window.
       _macOSLifecycleState = SchedulerBinding.instance.lifecycleState;
       WidgetsBinding.instance.addObserver(this);
-      _tabStateSubscription =
-          widget.tabController?.state.listen(_onMacOSTabStateChanged);
     }
-    Get.put<FFI>(_ffi, tag: widget.id);
+    _wasSelectedTab = _isSelectedTab;
+    _tabStateSubscription = widget.tabController?.state.listen((state) {
+      if (_wasSelectedTab && !_isSelectedTab) _deactivateInput();
+      _wasSelectedTab = _isSelectedTab;
+      if (isMacOS) _onMacOSTabStateChanged(state);
+    });
+    if (Get.isRegistered<FFI>(tag: widget.id)) {
+      Get.replace<FFI>(_ffi, tag: widget.id);
+    } else {
+      Get.put<FFI>(_ffi, tag: widget.id);
+    }
     _ffi.imageModel.addCallbackOnFirstImage((String peerId) {
       _ffi.canvasModel.activateLocalCursor();
       showKBLayoutTypeChooserIfNeeded(
@@ -189,8 +214,8 @@ class _RemotePageState extends State<RemotePage>
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      _ffi.dialogManager.showLoading(translate('Connecting...'),
+          onCancel: () => closeConnection(sessionId: sessionId));
     });
     WakelockManager.enable(_uniqueKey);
 
@@ -220,7 +245,7 @@ class _RemotePageState extends State<RemotePage>
     _blockableOverlayState.applyFfi(_ffi);
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController?.onSelected?.call(widget.id);
+      widget.tabController?.onSelected?.call(widget.tabKey ?? widget.id);
     });
 
     // Register callback to cancel debounce timer when relative mouse mode is disabled
@@ -283,13 +308,27 @@ class _RemotePageState extends State<RemotePage>
     final selected = tabState.selected;
     return selected >= 0 &&
         selected < tabState.tabs.length &&
-        tabState.tabs[selected].key == widget.id;
+        tabState.tabs[selected].key == (widget.tabKey ?? widget.id);
   }
 
   // Every Windows requestFocus() must pass this, or a blocking dialog or an
   // inactive tab could hand remote input to this page.
   bool get _windowsCanFocusRemoteInput =>
       _isSelectedTab && _blockableOverlayState.middleBlocked.isFalse;
+
+  void _deactivateInput() {
+    _macOSFullScreenFocusRecovery.cancel();
+    _macOSExplicitFocusRequestPending = false;
+    _cursorOverImage.value = false;
+    _cancelPointerLockCenterDebounceTimer();
+    _ffi.canvasModel.disableEdgeScroll();
+    _ffi.inputModel.deactivateSessionInput();
+    _macOSInputActive = false;
+    _rawKeyFocusNode.unfocus();
+    if (!isWeb && (_isSelectedTab || widget.tabKey == null)) {
+      bind.hostStopSystemKeyPropagate(stopped: true);
+    }
+  }
 
   bool get _isMacOSKeyboardContextActive {
     return stateGlobal.isFocused.value && !_isWindowBlur && _isSelectedTab;
@@ -517,6 +556,7 @@ class _RemotePageState extends State<RemotePage>
     }
     if (isMacOS) stateGlobal.getInputSource(force: true);
     stateGlobal.isFocused.value = true;
+    if (!_isSelectedTab) return;
 
     // Normal macOS windows wait for PointerEnter or PointerDown. A focused
     // fullscreen Space queues delayed recovery; if this window blurs again, the
@@ -581,6 +621,12 @@ class _RemotePageState extends State<RemotePage>
   }
 
   @override
+  void onWindowResized() => onWindowResize();
+
+  @override
+  void onWindowMoved() => onWindowMove();
+
+  @override
   void onWindowResize() {
     super.onWindowResize();
     // Update pointer lock center when window is resized
@@ -597,6 +643,7 @@ class _RemotePageState extends State<RemotePage>
   /// Update pointer lock center with debouncing to avoid excessive updates
   /// during rapid window move/resize events.
   void _updatePointerLockCenterIfNeeded() {
+    if (!_isSelectedTab) return;
     if (!_ffi.inputModel.relativeMouseMode.value) return;
 
     // Cancel any pending update and schedule a new one (debounce pattern)
@@ -657,15 +704,18 @@ class _RemotePageState extends State<RemotePage>
       if (closeSession) {
         _releaseMacOSRemoteInput();
       }
-      _tabStateSubscription?.cancel();
       WidgetsBinding.instance.removeObserver(this);
     }
+    _tabStateSubscription?.cancel();
+    if (usesUnifiedSessionTabs) windowManager.removeListener(this);
     super.dispose();
     debugPrint("REMOTE PAGE dispose session $sessionId ${widget.id}");
 
     // Defensive cleanup: ensure host system-key propagation is reset even if
     // MouseRegion.onExit never fired (e.g., tab closed while cursor inside).
-    if (!isWeb) bind.hostStopSystemKeyPropagate(stopped: true);
+    if (!isWeb && (_isSelectedTab || widget.tabKey == null)) {
+      bind.hostStopSystemKeyPropagate(stopped: true);
+    }
 
     _pointerLockCenterDebounceTimer?.cancel();
     _pointerLockCenterDebounceTimer = null;
@@ -695,8 +745,12 @@ class _RemotePageState extends State<RemotePage>
           overlays: SystemUiOverlay.values);
     }
     WakelockManager.disable(_uniqueKey);
-    await Get.delete<FFI>(tag: widget.id);
-    removeSharedStates(widget.id);
+    // A freshly reopened tab may already own the peer's registry entry.
+    if (Get.isRegistered<FFI>(tag: widget.id) &&
+        identical(Get.find<FFI>(tag: widget.id), _ffi)) {
+      await Get.delete<FFI>(tag: widget.id);
+      removeSharedStates(widget.id);
+    }
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -740,7 +794,7 @@ class _RemotePageState extends State<RemotePage>
                         "onFocusChange(window active:${!_isWindowBlur}) $imageFocused");
                     // See [onWindowBlur].
                     if (isWindows) {
-                      if (_isWindowBlur) {
+                      if (_isWindowBlur || !_windowsCanFocusRemoteInput) {
                         imageFocused = false;
                         Future.delayed(Duration.zero, () {
                           _rawKeyFocusNode.unfocus();
@@ -845,6 +899,7 @@ class _RemotePageState extends State<RemotePage>
   }
 
   void enterView(PointerEnterEvent evt) {
+    if (!_isSelectedTab) return;
     _ffi.canvasModel.rearmEdgeScroll();
 
     _cursorOverImage.value = true;
@@ -924,6 +979,7 @@ class _RemotePageState extends State<RemotePage>
       onEnter: onEnter,
       onExit: onExit,
       onPointerDown: (event) {
+        if (!_isSelectedTab) return;
         // A double check for blur status on Windows and macOS.
         // Note: If there's an `onPointerDown` event is triggered, `_isWindowBlur` is expected being false.
         // Sometimes the system does not send the necessary focus event to flutter. We should manually
@@ -959,10 +1015,12 @@ class _RemotePageState extends State<RemotePage>
     var paints = <Widget>[
       MouseRegion(
         onEnter: (evt) {
-          if (!isWeb) bind.hostStopSystemKeyPropagate(stopped: false);
+          if (!isWeb && _isSelectedTab)
+            bind.hostStopSystemKeyPropagate(stopped: false);
         },
         onExit: (evt) {
-          if (!isWeb) bind.hostStopSystemKeyPropagate(stopped: true);
+          if (!isWeb && _isSelectedTab)
+            bind.hostStopSystemKeyPropagate(stopped: true);
         },
         child: _ViewStyleUpdater(
           canvasModel: _ffi.canvasModel,

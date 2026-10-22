@@ -93,7 +93,9 @@ fi
 
 mkdir -p "$WIN_OUT_DIR"
 log "compilando $INSTALLER_BASE.exe ..."
-MSYS2_ARG_CONV_EXCL=/DBuildArch= "$ISCC" "$ISS_FILE" "/DBuildArch=$WIN_ARCH"
+APP_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
+NUMERIC_VERSION="$(python3 "$ROOT/res/update/application_version.py" "$APP_VERSION")"
+MSYS2_ARG_CONV_EXCL='*' "$ISCC" "$ISS_FILE" "/DBuildArch=$WIN_ARCH" "/DAppVersion=$APP_VERSION" "/DNumericVersion=$NUMERIC_VERSION"
 
 if [[ ! -f "$INSTALLER_OUT" ]]; then
   echo "[installer] ERRO: saída esperada não encontrada: $INSTALLER_OUT" >&2

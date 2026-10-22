@@ -154,7 +154,7 @@ jobs:
             flutter/ios/Runner/bridge_generated.h
 
   build:
-    name: ${{ matrix.platform }} / ${{ matrix.arch }}${{ matrix.win32 && ' + x86' || '' }} (cliente + suporte)
+    name: ${{ matrix.platform }} / ${{ matrix.arch }}${{ matrix.win32 && ' + x86' || '' }} (${{ matrix.arch == 'x86' && 'cliente' || 'cliente + suporte' }})
     needs: [preflight, bridges]
     if: always() && needs.preflight.result == 'success' && (needs.bridges.result == 'success' || needs.bridges.result == 'skipped')
     runs-on: ${{ matrix.runner }}
@@ -358,7 +358,7 @@ jobs:
           MACOS_NOTARY_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
           MACOS_NOTARY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_NOTARY_PASSWORD || '' }}
       - name: Build, sign, and save suporte
-        if: matrix.reuse_run == ''
+        if: matrix.reuse_run == '' && !(matrix.platform == 'windows' && matrix.arch == 'x86')
         uses: ./.github/actions/build-edition
         with:
           platform: ${{ matrix.platform }}

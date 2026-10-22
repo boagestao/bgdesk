@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Collect exactly the expected build outputs, with unique names and hashes."""
 import argparse
+from distribution import editions_for_target
 import hashlib
 import json
 from pathlib import Path
@@ -9,6 +10,8 @@ import tomllib
 
 
 def specs(platform, arch, edition):
+    if edition not in editions_for_target(platform, arch):
+        raise ValueError("Windows x86 is distributed only as cliente")
     if platform == "android":
         if arch != "universal":
             raise ValueError("Android distribution requires a universal APK")

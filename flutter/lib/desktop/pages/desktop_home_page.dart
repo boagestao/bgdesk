@@ -26,7 +26,9 @@ import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
 
 class DesktopHomePage extends StatefulWidget {
-  const DesktopHomePage({Key? key}) : super(key: key);
+  const DesktopHomePage({Key? key, this.connectionPageKey}) : super(key: key);
+
+  final GlobalKey<ConnectionPageState>? connectionPageKey;
 
   @override
   State<DesktopHomePage> createState() => _DesktopHomePageState();
@@ -186,7 +188,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   buildRightPane(BuildContext context) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: ConnectionPage(),
+      child: ConnectionPage(key: widget.connectionPageKey),
     );
   }
 

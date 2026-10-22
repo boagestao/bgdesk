@@ -1,3 +1,4 @@
+import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -28,6 +29,7 @@ class RelativeMouseModel {
 
   final bool Function() getPointerInsideImage;
   final void Function(bool inside) setPointerInsideImage;
+  final bool Function()? canCaptureInput;
 
   RelativeMouseModel({
     required this.sessionId,
@@ -39,6 +41,7 @@ class RelativeMouseModel {
     required this.modify,
     required this.getPointerInsideImage,
     required this.setPointerInsideImage,
+    this.canCaptureInput,
   });
 
   final RelativeMouseAccumulator _accumulator = RelativeMouseAccumulator();
@@ -77,7 +80,7 @@ class RelativeMouseModel {
   // TODO(perf): Consider routing native delta through RelativeMouseAccumulator/throttle
   // if high-polling mice (e.g. 1000Hz+) cause message flooding on the network.
   void _onNativeMouseDelta(int dx, int dy) {
-    if (!enabled.value) return;
+    if (!enabled.value || canCaptureInput?.call() == false) return;
     // Send directly to remote without accumulator (native already provides integer deltas)
     _sendMouseMessageToSession({
       'type': 'move_relative',
@@ -104,16 +107,24 @@ class RelativeMouseModel {
       return false;
     }
 
+    final generation = _enableRequestId;
+    _activeNativeModel = this;
     try {
       final result =
           await _hostChannel!.invokeMethod('enableNativeRelativeMouseMode');
       if (result == true) {
-        _activeNativeModel = this;
+        if (_disposed ||
+            generation != _enableRequestId ||
+            canCaptureInput?.call() == false) {
+          await _disableNativeRelativeMouseMode();
+          return false;
+        }
         return true;
       }
     } catch (e) {
       debugPrint('[RelMouse] Failed to enable native relative mouse mode: $e');
     }
+    if (_activeNativeModel == this) _activeNativeModel = null;
     return false;
   }
 
@@ -387,6 +398,7 @@ class RelativeMouseModel {
     }
 
     if (value) {
+      if (_disposed || canCaptureInput?.call() == false) return false;
       if (!keyboardPerm() || isViewCamera()) {
         return false;
       }
@@ -450,6 +462,7 @@ class RelativeMouseModel {
         return false;
       }
     } else {
+      ++_enableRequestId;
       // Best-effort marker for Rust rdev grab loop (ESC behavior).
       // Bypass keyboardPerm check to ensure Rust state is always synced,
       // even if permission was revoked while relative mode was active.
@@ -481,6 +494,10 @@ class RelativeMouseModel {
 
   /// Called when platform setup completes successfully to finalize enabling relative mouse mode.
   void _completeEnableRelativeMouseMode() {
+    if (_disposed || canCaptureInput?.call() == false) {
+      _disableWithCleanup();
+      return;
+    }
     enabled.value = true;
 
     // Show toast notification so user knows how to exit relative mouse mode (desktop only).
@@ -769,7 +786,7 @@ class RelativeMouseModel {
     if (!isDesktop) return;
 
     // Null safety check for kWindowId.
-    if (kWindowId == null) {
+    if (kWindowId == null && !usesUnifiedSessionTabs) {
       if (enabled.value) {
         _disableWithCleanup();
       }
@@ -777,8 +794,9 @@ class RelativeMouseModel {
     }
 
     try {
-      final wc = WindowController.fromWindowId(kWindowId!);
-      final frame = await wc.getFrame();
+      final frame = usesUnifiedSessionTabs
+          ? await windowManager.getBounds(ignoreDevicePixelRatio: isWindows)
+          : await WindowController.fromWindowId(kWindowId!).getFrame();
 
       if (frame.width <= 0 || frame.height <= 0) {
         if (enabled.value) {
@@ -1017,6 +1035,7 @@ class RelativeMouseModel {
   /// Core cleanup logic shared by [_disableWithCleanup] and [dispose].
   /// Sends disable message to Rust, releases platform resources, and resets state.
   void _performCleanupCore() {
+    ++_enableRequestId;
     // Best-effort marker for Rust rdev grab loop (ESC behavior).
     // Bypass keyboardPerm check to ensure Rust state is always synced.
     _sendMouseMessageToSession(

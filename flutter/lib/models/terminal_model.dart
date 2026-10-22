@@ -13,6 +13,7 @@ import 'platform_model.dart';
 import 'rustdesk_terminal.dart';
 import 'terminal_copy_shortcut.dart';
 import 'terminal_mouse_handler.dart';
+import '../utils/multi_window_manager.dart';
 
 bool canConfigureTerminalClipboardPermission({
   required bool settingsDisabled,
@@ -454,14 +455,18 @@ class TerminalModel with ChangeNotifier {
               .whereType<int>()
               .where((id) => !parent.terminalModels.containsKey(id))
               .toList();
-      if (kWindowId != null && persistentSessions.isNotEmpty) {
-        DesktopMultiWindow.invokeMethod(
-            kWindowId!,
-            kWindowEventRestoreTerminalSessions,
-            jsonEncode({
-              'peer_id': id,
-              'persistent_sessions': persistentSessions,
-            }));
+      if (persistentSessions.isNotEmpty) {
+        final args = jsonEncode({
+          'peer_id': id,
+          'session_id': parent.sessionId.toString(),
+          'persistent_sessions': persistentSessions
+        });
+        if (usesUnifiedSessionTabs) {
+          unawaited(rustDeskWinManager.terminalSessionRestorer?.call(args));
+        } else if (kWindowId != null) {
+          DesktopMultiWindow.invokeMethod(
+              kWindowId!, kWindowEventRestoreTerminalSessions, args);
+        }
       }
     } else {
       _writeToTerminal('Failed to open terminal: $message\r\n');

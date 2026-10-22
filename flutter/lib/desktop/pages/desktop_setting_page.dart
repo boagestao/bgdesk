@@ -551,7 +551,7 @@ class _GeneralState extends State<_General> {
         _OptionCheckBox(context, 'Adaptive bitrate', kOptionEnableAbr),
       if (!isWeb) wallpaper(),
       if (!isWeb && !incomingOnly) ...[
-        _OptionCheckBox(
+        if (!usesUnifiedSessionTabs) _OptionCheckBox(
           context,
           'Open connection in new tab',
           kOptionOpenNewConnInTabs,

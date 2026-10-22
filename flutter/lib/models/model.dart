@@ -227,7 +227,8 @@ class FfiModel with ChangeNotifier {
     });
     // Only inited at remote page
     if (parent.target?.connType == ConnType.defaultConn) {
-      KeyboardEnabledState.find(id).value = _permissions['keyboard'] != false;
+      KeyboardEnabledState.find(parent.target?.sharedStateId ?? id).value =
+          _permissions['keyboard'] != false;
     }
 
     // If keyboard permission was revoked while relative mouse mode is active,
@@ -272,7 +273,8 @@ class FfiModel with ChangeNotifier {
     _secure = secure;
     _direct = direct;
     try {
-      var connectionType = ConnectionTypeState.find(peerId);
+      var connectionType =
+          ConnectionTypeState.find(parent.target?.sharedStateId ?? peerId);
       connectionType.setSecure(secure);
       connectionType.setDirect(direct);
       connectionType.setStreamType(streamType);
@@ -407,7 +409,7 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'switch_back') {
         final peer_id = evt['peer_id'].toString();
         await bind.sessionSwitchSides(sessionId: sessionId);
-        closeConnection(id: peer_id);
+        closeConnection(id: peer_id, sessionId: sessionId);
       } else if (name == 'portable_service_running') {
         _handlePortableServiceRunning(peerId, evt);
       } else if (name == 'on_url_scheme_received') {
@@ -429,7 +431,8 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'update_voice_call_state') {
         parent.target?.serverModel.updateVoiceCallState(evt);
       } else if (name == 'fingerprint') {
-        FingerprintState.find(peerId).value = evt['fingerprint'] ?? '';
+        FingerprintState.find(parent.target?.sharedStateId ?? peerId).value =
+            evt['fingerprint'] ?? '';
       } else if (name == "sync_peer_hash_password_to_personal_ab") {
         if (desktopType == DesktopType.main || isWeb || isMobile) {
           final id = evt['id'];
@@ -458,7 +461,8 @@ class FfiModel with ChangeNotifier {
           parent.target?.fileModel.sendEmptyDirs(evt);
         }
       } else if (name == "record_status") {
-        if (desktopType == DesktopType.remote ||
+        if (usesUnifiedSessionTabs ||
+            desktopType == DesktopType.remote ||
             desktopType == DesktopType.viewCamera ||
             isMobile) {
           parent.target?.recordingModel.updateStatus(evt['start'] == 'true');
@@ -852,7 +856,8 @@ class FfiModel with ChangeNotifier {
 
     if (!_pi.isSupportMultiUiSession) {
       try {
-        CurrentDisplayState.find(peerId).value = display;
+        CurrentDisplayState.find(parent.target?.sharedStateId ?? peerId).value =
+            display;
       } catch (e) {
         //
       }
@@ -1071,7 +1076,7 @@ class FfiModel with ChangeNotifier {
     if (showNoteEdit) {
       await showConnEndAuditDialogCloseCanceled(
           ffi: parent.target!, type: type, title: title, text: text);
-      closeConnection();
+      parent.target?.closeTab();
     } else {
       VoidCallback? onSubmit;
       if (noteAllowed && hasRetry) {
@@ -1081,7 +1086,7 @@ class FfiModel with ChangeNotifier {
           _timer = null;
           await showConnEndAuditDialogCloseCanceled(
               ffi: ffi, type: type, title: title, text: text);
-          closeConnection();
+          parent.target?.closeTab();
         };
       }
       msgBox(sessionId, type, title, text, link, dialogManager,
@@ -1122,7 +1127,7 @@ class FfiModel with ChangeNotifier {
     clearPermissions();
     dialogManager.dismissAll();
     dialogManager.showLoading(translate('Connecting...'),
-        onCancel: closeConnection);
+        onCancel: () => closeConnection(sessionId: sessionId));
   }
 
   Future<void> showRelayHintDialog(
@@ -1145,13 +1150,13 @@ class FfiModel with ChangeNotifier {
           ffi: parent.target!, type: type, title: title, text: text2)) {
         return;
       }
-      closeConnection();
+      parent.target?.closeTab();
       return;
     }
 
     dialogManager.show(tag: '$sessionId-$type', (setState, close, context) {
       onClose() {
-        closeConnection();
+        parent.target?.closeTab();
         close();
       }
 
@@ -1183,7 +1188,7 @@ class FfiModel with ChangeNotifier {
   void showConnectedWaitingForImage(OverlayDialogManager dialogManager,
       SessionID sessionId, String type, String title, String text) {
     onClose() {
-      closeConnection();
+      parent.target?.closeTab();
     }
 
     if (waitForFirstImage.isFalse) return;
@@ -1383,7 +1388,8 @@ class FfiModel with ChangeNotifier {
     }
 
     try {
-      CurrentDisplayState.find(peerId).value = _pi.currentDisplay;
+      CurrentDisplayState.find(parent.target?.sharedStateId ?? peerId).value =
+          _pi.currentDisplay;
     } catch (e) {
       //
     }
@@ -1561,7 +1567,8 @@ class FfiModel with ChangeNotifier {
     );
     _pi.currentDisplay = 0;
     try {
-      CurrentDisplayState.find(peerId).value = _pi.currentDisplay;
+      CurrentDisplayState.find(parent.target?.sharedStateId ?? peerId).value =
+          _pi.currentDisplay;
     } catch (e) {
       //
     }
@@ -1737,10 +1744,8 @@ class FfiModel with ChangeNotifier {
         for (final key in updateJson.keys) {
           _pi.platformAdditions[key] = updateJson[key];
         }
-        if (!updateJson
-            .containsKey(kPlatformAdditionsBgDeskVirtualDisplays)) {
-          _pi.platformAdditions
-              .remove(kPlatformAdditionsBgDeskVirtualDisplays);
+        if (!updateJson.containsKey(kPlatformAdditionsBgDeskVirtualDisplays)) {
+          _pi.platformAdditions.remove(kPlatformAdditionsBgDeskVirtualDisplays);
         }
         if (!updateJson.containsKey(kPlatformAdditionsAmyuniVirtualDisplays)) {
           _pi.platformAdditions.remove(kPlatformAdditionsAmyuniVirtualDisplays);
@@ -1762,7 +1767,8 @@ class FfiModel with ChangeNotifier {
       }
       _pi.currentDisplay = int.parse(evt['display_idx']);
       try {
-        CurrentDisplayState.find(peerId).value = _pi.currentDisplay;
+        CurrentDisplayState.find(parent.target?.sharedStateId ?? peerId).value =
+            _pi.currentDisplay;
       } catch (e) {
         //
       }
@@ -1782,7 +1788,8 @@ class FfiModel with ChangeNotifier {
     pi.currentDisplay = display;
     updateCurDisplay(sessionId, updateCursorPos: updateCursorPos);
     try {
-      CurrentDisplayState.find(peerId).value = display;
+      CurrentDisplayState.find(parent.target?.sharedStateId ?? peerId).value =
+          display;
     } catch (e) {
       //
     }
@@ -1792,7 +1799,8 @@ class FfiModel with ChangeNotifier {
     _inputBlocked = evt['input_state'] == 'on';
     notifyListeners();
     try {
-      BlockInputState.find(peerId).value = evt['input_state'] == 'on';
+      BlockInputState.find(parent.target?.sharedStateId ?? peerId).value =
+          evt['input_state'] == 'on';
     } catch (e) {
       //
     }
@@ -1809,10 +1817,11 @@ class FfiModel with ChangeNotifier {
             sessionId: sessionId, arg: 'privacy-mode-impl-key');
         // For compatibility, version < 1.2.4, the default value is 'privacy_mode_impl_mag'.
         final initDefaultPrivacyMode = 'privacy_mode_impl_mag';
-        PrivacyModeState.find(peerId).value =
+        PrivacyModeState.find(parent.target?.sharedStateId ?? peerId).value =
             privacyModeImpl ?? initDefaultPrivacyMode;
       } else {
-        PrivacyModeState.find(peerId).value = '';
+        PrivacyModeState.find(parent.target?.sharedStateId ?? peerId).value =
+            '';
       }
     } catch (e) {
       //
@@ -1826,10 +1835,12 @@ class FfiModel with ChangeNotifier {
     // current our flutter code quality is fucking shit now. !!!!!!!!!!!!!!!!
     try {
       if (value) {
-        ShowRemoteCursorState.find(id).value = value;
+        ShowRemoteCursorState.find(parent.target?.sharedStateId ?? id).value =
+            value;
       } else {
-        ShowRemoteCursorState.find(id).value = bind.sessionGetToggleOptionSync(
-            sessionId: sessionId, arg: 'show-remote-cursor');
+        ShowRemoteCursorState.find(parent.target?.sharedStateId ?? id).value =
+            bind.sessionGetToggleOptionSync(
+                sessionId: sessionId, arg: 'show-remote-cursor');
       }
     } catch (e) {
       //
@@ -2529,7 +2540,8 @@ class CanvasModel with ChangeNotifier {
   void activateLocalCursor() {
     if (isDesktop || isWebDesktop) {
       try {
-        RemoteCursorMovedState.find(id).value = false;
+        RemoteCursorMovedState.find(parent.target?.sharedStateId ?? id).value =
+            false;
       } catch (e) {
         //
       }
@@ -2545,7 +2557,8 @@ class CanvasModel with ChangeNotifier {
         parent.target!.cursorModel.moveLocal(x, y);
       } else {
         try {
-          RemoteCursorMovedState.find(id).value = false;
+          RemoteCursorMovedState.find(parent.target?.sharedStateId ?? id)
+              .value = false;
         } catch (e) {
           //
         }
@@ -3819,7 +3832,8 @@ class CursorModel with ChangeNotifier {
     _x = double.parse(evt['x']);
     _y = double.parse(evt['y']);
     try {
-      RemoteCursorMovedState.find(id).value = true;
+      RemoteCursorMovedState.find(parent.target?.sharedStateId ?? id).value =
+          true;
     } catch (e) {
       //
     }
@@ -4031,7 +4045,12 @@ class FFI {
   var id = '';
   var version = '';
   var connType = ConnType.defaultConn;
+  String? tabKey;
+  String? sharedStateKey;
+  String get sharedStateId => sharedStateKey ?? id;
   var closed = false;
+
+  void closeTab() => closeConnection(sessionId: sessionId);
 
   /// dialogManager use late to ensure init after main page binding [globalKey]
   late final dialogManager = OverlayDialogManager();
@@ -4125,6 +4144,7 @@ class FFI {
     List<int>? displays,
   }) {
     closed = false;
+    _closeFuture = null;
     if (isMobile) mobileReset();
     assert(
         (!(isPortForward && isViewCamera)) &&
@@ -4372,7 +4392,11 @@ class FFI {
   }
 
   /// Close the remote session.
-  Future<void> close({bool closeSession = true}) async {
+  Future<void>? _closeFuture;
+  Future<void> close({bool closeSession = true}) =>
+      _closeFuture ??= _close(closeSession: closeSession);
+
+  Future<void> _close({required bool closeSession}) async {
     closed = true;
     if (isWeb) {
       platformFFI.clearVideoFrameCallback();

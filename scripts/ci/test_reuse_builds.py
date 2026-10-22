@@ -22,7 +22,7 @@ class ReuseBuildTests(unittest.TestCase):
                         head_repository={'full_name': REPO})
         self.jobs = [dict(name='windows / x86_64 + x86 (cliente + suporte)', status='completed', conclusion='success')]
         self.artifacts = [dict(name=f'build-windows-{arch}-{edition}', expired=False)
-                          for arch in ('x86_64', 'x86') for edition in reuse.EDITIONS]
+                          for arch in ('x86_64', 'x86') for edition in reuse.editions_for_target('windows', arch)]
         self.version = '1.5.1'
 
     def query(self, path, **kwargs):
@@ -50,6 +50,16 @@ class ReuseBuildTests(unittest.TestCase):
         target = self.plan()
         self.assertEqual(target['reuse_run'], '')
         self.assertTrue(target['needs_build'])
+
+    def test_revision_is_part_of_the_reuse_identity(self):
+        matrix = dict(include=[dict(platform='windows', arch='x86_64')])
+        for version in ('1.5.1', '1.5.1-2'):
+            self.version = version
+            result = reuse.make_plan(matrix, '1.5.1-1', REPO, self.query, lambda *args: True)
+            self.assertTrue(result['include'][0]['needs_build'])
+        self.version = '1.5.1-1'
+        result = reuse.make_plan(matrix, '1.5.1-1', REPO, self.query, lambda *args: True)
+        self.assertFalse(result['include'][0]['needs_build'])
 
     def test_expired_or_missing_edition_requires_only_that_architecture(self):
         for expired in (True, False):
@@ -113,7 +123,7 @@ class ReuseBuildTests(unittest.TestCase):
         def download(repository, run, platform, arch, edition, directory):
             directory.mkdir()
             self.directory(directory, edition)
-            if edition == 'suporte':
+            if edition == 'cliente':
                 (directory / 'inno-exe.exe').unlink()
         with patch.object(reuse, 'download_edition', side_effect=download):
             self.assertFalse(reuse.validate_candidate(REPO, '123', '1.5.1', 'windows', 'x86'))

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
@@ -67,8 +68,27 @@ class RustDeskMultiWindowManager {
   final List<int> _portForwardWindows = List.empty(growable: true);
   final List<int> _terminalWindows = List.empty(growable: true);
 
+  // Installed by the support main tab host. Do not replace the main IPC handler.
+  Future<void> Function(WindowType, Map<String, dynamic>)? _sessionTabOpener;
+  Completer<void> _sessionTabHostReady = Completer<void>();
+  Future<void> Function(WindowType, Map<String, dynamic>)?
+      get sessionTabOpener => _sessionTabOpener;
+  set sessionTabOpener(
+      Future<void> Function(WindowType, Map<String, dynamic>)? opener) {
+    _sessionTabOpener = opener;
+    if (opener == null) {
+      _sessionTabHostReady = Completer<void>();
+    } else if (!_sessionTabHostReady.isCompleted) {
+      _sessionTabHostReady.complete();
+    }
+  }
+
+  bool Function()? hasMainSessionTabs;
+  Future<void> Function(String)? terminalSessionRestorer;
+
   moveTabToNewWindow(int windowId, String peerId, String sessionId,
       WindowType windowType) async {
+    if (sessionTabOpener != null) return;
     var params = {
       'type': windowType.index,
       'id': peerId,
@@ -101,6 +121,12 @@ class RustDeskMultiWindowManager {
   openMonitorSession(int windowId, String peerId, int display, int displayCount,
       Rect? screenRect, int windowType) async {
     final isCamera = windowType == WindowType.ViewCamera.index;
+    if (sessionTabOpener != null) {
+      await sessionTabOpener!(
+          isCamera ? WindowType.ViewCamera : WindowType.RemoteDesktop,
+          {'id': peerId, 'display': display});
+      return;
+    }
     final windowIDs = isCamera ? _viewCameraWindows : _remoteDesktopWindows;
     if (windowIDs.length > 1) {
       for (final windowId in windowIDs) {
@@ -253,6 +279,12 @@ class RustDeskMultiWindowManager {
     if (connToken != null) {
       params['connToken'] = connToken;
     }
+    if (usesUnifiedSessionTabs) {
+      // Deep links can arrive before the first Flutter frame mounts the host.
+      await _sessionTabHostReady.future;
+      await sessionTabOpener!(type, params);
+      return MultiWindowCallResult(kMainWindowId, null);
+    }
     final msg = jsonEncode(params);
 
     // separate window for file transfer is not supported
@@ -360,6 +392,17 @@ class RustDeskMultiWindowManager {
   }) async {
     if (!await ensureLicenseBeforeConnect()) {
       return MultiWindowCallResult(kInvalidWindowId, null);
+    }
+    if (usesUnifiedSessionTabs) {
+      await _sessionTabHostReady.future;
+      await sessionTabOpener!(WindowType.Terminal, {
+        'id': remoteId,
+        'password': password,
+        'forceRelay': forceRelay,
+        'isSharedPassword': isSharedPassword,
+        'connToken': connToken,
+      });
+      return MultiWindowCallResult(kMainWindowId, null);
     }
     // Iterate through terminal windows in reverse order to prioritize
     // the most recently added or used windows, as they are more likely
@@ -479,7 +522,8 @@ class RustDeskMultiWindowManager {
     }
     for (int i = 0; i < windows.length; i++) {
       final wId = windows[i];
-      final shouldSavePos = type != WindowType.Terminal || i == windows.length - 1;
+      final shouldSavePos =
+          type != WindowType.Terminal || i == windows.length - 1;
       if (shouldSavePos) {
         debugPrint("closing multi window, type: ${type.toString()} id: $wId");
         try {
@@ -520,10 +564,11 @@ class RustDeskMultiWindowManager {
   /// Whether any remote / file-transfer / terminal / camera / port-forward
   /// window is still open (created and not user-closed/hidden).
   ///
-  /// Used on macOS so closing the main window does not quit the app while
-  /// session windows remain. Relies on the type lists + inactive set rather
-  /// than only `_activeWindows` / native visibility, which can be stale.
+  /// Used so closing the main window does not quit while other session windows
+  /// remain. Relies on the type lists + inactive set rather than only
+  /// `_activeWindows` / native visibility, which can be stale.
   bool hasOpenSessionWindows() {
+    if (hasMainSessionTabs?.call() == true) return true;
     bool listHasOpen(List<int> windows) =>
         windows.any((id) => !_inactiveWindows.contains(id));
     return listHasOpen(_remoteDesktopWindows) ||
@@ -589,6 +634,7 @@ class RustDeskMultiWindowManager {
   // Only the main window knows `_remoteDesktopWindows` and `_activeWindows`.
   // So we need to call the main window to get the other remote windows' coords.
   Future<List<RemoteWindowCoords>> getOtherRemoteWindowCoordsFromMain() async {
+    if (sessionTabOpener != null) return [];
     List<RemoteWindowCoords> coords = [];
     // Call the main window to get the coords of other remote windows.
     String res = await DesktopMultiWindow.invokeMethod(

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reuse approved main builds by application version and target, not source diff."""
 import argparse
+from distribution import editions_for_target
 import base64
 import hashlib
 import importlib.util
@@ -37,10 +38,12 @@ def approved_target(jobs, artifacts, platform, arch):
     names = {f'{platform} / {arch} (cliente + suporte)'}
     if platform == 'windows':
         names.add('windows / x86_64 + x86 (cliente + suporte)')
+        if arch == 'x86':
+            names.add('windows / x86 (cliente)')
     passed = any(job.get('name') in names and job.get('status') == 'completed'
                  and job.get('conclusion') == 'success' for job in jobs)
     available = {a['name'] for a in artifacts if not a.get('expired', True)}
-    return passed and all(f'build-{platform}-{arch}-{edition}' in available for edition in EDITIONS)
+    return passed and all(f'build-{platform}-{arch}-{edition}' in available for edition in editions_for_target(platform, arch))
 
 
 def make_plan(matrix, version, repository, query=api, validate=None):
@@ -118,7 +121,7 @@ def validate_candidate(repository, run_id, version, platform, arch):
     # Validate both editions before deciding to skip their compilation.
     with tempfile.TemporaryDirectory(prefix='bgdesk-reuse-check-') as temporary:
         try:
-            for edition in EDITIONS:
+            for edition in editions_for_target(platform, arch):
                 directory = Path(temporary) / edition
                 download_edition(repository, run_id, platform, arch, edition, directory)
                 validate_directory(directory, version, platform, arch, edition)
@@ -138,7 +141,7 @@ def restore(repository, run_id, commit, version, platform, arch):
     artifacts = [a for page in api(f'repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100', paginate=True) for a in page['artifacts']]
     if not approved_target(jobs, artifacts, platform, arch):
         raise ValueError('Source target did not pass or its artifacts expired')
-    for edition in EDITIONS:
+    for edition in editions_for_target(platform, arch):
         directory = Path(f'release-artifacts/{platform}-{arch}-{edition}')
         download_edition(repository, run_id, platform, arch, edition, directory)
         validate_directory(directory, version, platform, arch, edition)

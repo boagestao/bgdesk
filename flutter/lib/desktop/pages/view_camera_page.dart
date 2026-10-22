@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter_hbb/common/widgets/remote_input.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
@@ -35,6 +36,7 @@ class ViewCameraPage extends StatefulWidget {
     required this.id,
     required this.toolbarState,
     this.sessionId,
+    this.tabKey,
     this.tabWindowId,
     this.password,
     this.display,
@@ -44,10 +46,12 @@ class ViewCameraPage extends StatefulWidget {
     this.forceRelay,
     this.isSharedPassword,
   }) : super(key: key) {
-    initSharedStates(id);
+    initSharedStates(sharedStateId);
   }
 
   final String id;
+  final String? tabKey;
+  String get sharedStateId => tabKey ?? id;
   final SessionID? sessionId;
   final int? tabWindowId;
   final int? display;
@@ -60,6 +64,10 @@ class ViewCameraPage extends StatefulWidget {
   final SimpleWrapper<State<ViewCameraPage>?> _lastState = SimpleWrapper(null);
   final DesktopTabController? tabController;
 
+  FFI? get initializedFfi => (_lastState.value as _ViewCameraPageState?)?._ffi;
+  void deactivateInput() =>
+      (_lastState.value as _ViewCameraPageState?)?._deactivateInput();
+
   FFI get ffi => (_lastState.value! as _ViewCameraPageState)._ffi;
 
   @override
@@ -71,7 +79,7 @@ class ViewCameraPage extends StatefulWidget {
 }
 
 class _ViewCameraPageState extends State<ViewCameraPage>
-    with AutomaticKeepAliveClientMixin, MultiWindowListener {
+    with AutomaticKeepAliveClientMixin, MultiWindowListener, WindowListener {
   Timer? _timer;
   String keyboardMode = "legacy";
   bool _isWindowBlur = false;
@@ -97,11 +105,32 @@ class _ViewCameraPageState extends State<ViewCameraPage>
 
   void _initStates(String id) {}
 
+  bool get _isSelectedTab =>
+      widget.tabController == null ||
+      widget.tabController!.selectedTab?.key == (widget.tabKey ?? widget.id);
+
+  void _deactivateInput() {
+    _ffi.inputModel.deactivateSessionInput();
+    _rawKeyFocusNode.unfocus();
+    _cursorOverImage.value = false;
+  }
+
   @override
   void initState() {
     super.initState();
     _ffi = FFI(widget.sessionId);
-    Get.put<FFI>(_ffi, tag: widget.id);
+    _ffi.tabKey = widget.tabKey;
+    _ffi.sharedStateKey = widget.sharedStateId;
+    _ffi.inputModel.isSessionSelected = () => mounted && _isSelectedTab;
+    _ffi.inputModel.sessionSelectionGeneration =
+        () => widget.tabController?.selectionGeneration ?? 0;
+    _ffi.shortcutModel.isSessionSelected = () => mounted && _isSelectedTab;
+    if (usesUnifiedSessionTabs) windowManager.addListener(this);
+    if (Get.isRegistered<FFI>(tag: widget.sharedStateId)) {
+      Get.replace<FFI>(_ffi, tag: widget.sharedStateId);
+    } else {
+      Get.put<FFI>(_ffi, tag: widget.sharedStateId);
+    }
     _ffi.imageModel.addCallbackOnFirstImage((String peerId) {
       showKBLayoutTypeChooserIfNeeded(
           _ffi.ffiModel.pi.platform, _ffi.dialogManager);
@@ -120,9 +149,10 @@ class _ViewCameraPageState extends State<ViewCameraPage>
       connToken: widget.connToken,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      _ffi.dialogManager.showLoading(translate('Connecting...'),
+          onCancel: () => closeConnection(sessionId: sessionId));
     });
     WakelockManager.enable(_uniqueKey);
 
@@ -145,13 +175,15 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     _blockableOverlayState.applyFfi(_ffi);
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController?.onSelected?.call(widget.id);
+      if (mounted)
+        widget.tabController?.onSelected?.call(widget.tabKey ?? widget.id);
     });
   }
 
   @override
   void onWindowBlur() {
     super.onWindowBlur();
+    _deactivateInput();
     // On windows, we use `focus` way to handle keyboard better.
     // Now on Linux, there's some rdev issues which will break the input.
     // We disable the `focus` way for non-Windows temporarily.
@@ -171,7 +203,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     if (isWindows) {
       _isWindowBlur = false;
     }
-    stateGlobal.isFocused.value = true;
+    if (_isSelectedTab) stateGlobal.isFocused.value = true;
   }
 
   @override
@@ -227,6 +259,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
       _ffi.inputModel.enterOrLeave(false);
     }
     DesktopMultiWindow.removeListener(this);
+    if (usesUnifiedSessionTabs) windowManager.removeListener(this);
     _ffi.dialogManager.hideMobileActionsOverlay();
     _ffi.imageModel.disposeImage();
     _ffi.cursorModel.disposeImages();
@@ -239,8 +272,11 @@ class _ViewCameraPageState extends State<ViewCameraPage>
           overlays: SystemUiOverlay.values);
     }
     WakelockManager.disable(_uniqueKey);
-    await Get.delete<FFI>(tag: widget.id);
-    removeSharedStates(widget.id);
+    if (Get.isRegistered<FFI>(tag: widget.sharedStateId) &&
+        identical(Get.find<FFI>(tag: widget.sharedStateId), _ffi)) {
+      await Get.delete<FFI>(tag: widget.sharedStateId);
+      removeSharedStates(widget.sharedStateId);
+    }
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -362,6 +398,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
   }
 
   void enterView(PointerEnterEvent evt) {
+    if (!_isSelectedTab) return;
     _cursorOverImage.value = true;
     _firstEnterImage.value = true;
     if (_onEnterOrLeaveImage4Toolbar != null) {
@@ -449,7 +486,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
       }, child: LayoutBuilder(builder: (context, constraints) {
         final c = Provider.of<CanvasModel>(context, listen: false);
         Future.delayed(Duration.zero, () => c.updateViewStyle());
-        final peerDisplay = CurrentDisplayState.find(widget.id);
+        final peerDisplay = CurrentDisplayState.find(widget.sharedStateId);
         return Obx(
           () => _ffi.ffiModel.pi.isSet.isFalse
               ? Container(color: Colors.transparent)

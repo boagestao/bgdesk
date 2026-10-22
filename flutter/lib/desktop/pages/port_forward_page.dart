@@ -34,8 +34,10 @@ class PortForwardPage extends StatefulWidget {
     required this.isSharedPassword,
     this.forceRelay,
     this.connToken,
+    this.tabKey,
   }) : super(key: key);
   final String id;
+  final String? tabKey;
   final String? password;
   final DesktopTabController tabController;
   final bool isRDP;
@@ -43,6 +45,8 @@ class PortForwardPage extends StatefulWidget {
   final bool? isSharedPassword;
   final String? connToken;
   final SimpleWrapper<State<PortForwardPage>?> _lastState = SimpleWrapper(null);
+
+  FFI? get initializedFfi => (_lastState.value as _PortForwardPageState?)?._ffi;
 
   FFI get ffi => (_lastState.value! as _PortForwardPageState)._ffi;
 
@@ -66,6 +70,7 @@ class _PortForwardPageState extends State<PortForwardPage>
   void initState() {
     super.initState();
     _ffi = FFI(null);
+    _ffi.tabKey = widget.tabKey;
     _ffi.start(widget.id,
         isPortForward: true,
         password: widget.password,
@@ -73,11 +78,17 @@ class _PortForwardPageState extends State<PortForwardPage>
         forceRelay: widget.forceRelay,
         connToken: widget.connToken,
         isRdp: widget.isRDP);
-    Get.put<FFI>(_ffi, tag: 'pf_${widget.id}');
+    final tag = 'pf_${widget.tabKey ?? widget.id}';
+    if (Get.isRegistered<FFI>(tag: tag)) {
+      Get.replace<FFI>(_ffi, tag: tag);
+    } else {
+      Get.put<FFI>(_ffi, tag: tag);
+    }
     debugPrint("Port forward page init success with id ${widget.id}");
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController.onSelected?.call(widget.id);
+      if (mounted)
+        widget.tabController.onSelected?.call(widget.tabKey ?? widget.id);
     });
   }
 
@@ -85,7 +96,14 @@ class _PortForwardPageState extends State<PortForwardPage>
   void dispose() {
     _ffi.close();
     _ffi.dialogManager.dismissAll();
-    Get.delete<FFI>(tag: 'pf_${widget.id}');
+    final tag = 'pf_${widget.tabKey ?? widget.id}';
+    if (Get.isRegistered<FFI>(tag: tag) &&
+        identical(Get.find<FFI>(tag: tag), _ffi)) {
+      Get.delete<FFI>(tag: tag);
+    }
+    localPortController.dispose();
+    remoteHostController.dispose();
+    remotePortController.dispose();
     super.dispose();
   }
 

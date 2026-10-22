@@ -1228,7 +1228,11 @@ pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> Result
     let info_plist = format!("{}/Contents/Info.plist", src_app);
     let staged_version_result = (|| -> ResultType<String> {
         let output = Command::new("/usr/libexec/PlistBuddy")
-            .args(["-c", "Print :CFBundleShortVersionString", &info_plist])
+            .args(["-c", if expected_version.contains('-') {
+                "Print :BGDeskApplicationVersion"
+            } else {
+                "Print :CFBundleShortVersionString"
+            }, &info_plist])
             .output()?;
         if !output.status.success() {
             bail!(

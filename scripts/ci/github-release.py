@@ -131,7 +131,7 @@ def reconcile_stable(repository, version, records):
     upload_files(repository, tag, final, list(public.values()))
     if final['target_commitish'] != existing['target_commitish']:
         raise ValueError('Existing stable target changed during synchronization')
-    print(f'Stable {tag} verified: {len(public)} public packages, including all four Windows Setups. Existing tag preserved.')
+    print(f'Stable {tag} verified: {len(public)} public packages, including the required Windows Setups. Existing tag preserved.')
 
 
 def main():

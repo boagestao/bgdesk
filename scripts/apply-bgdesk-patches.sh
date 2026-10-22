@@ -64,13 +64,11 @@ patch_hbb_common() {
 
 # --- Cargo.toml raiz ---
 patch_cargo_toml() {
-  log "Cargo.toml: versão e branding"
+  log "Cargo.toml: branding (versão preservada)"
   sed -i '' \
-    -e 's/^version = ".*"/version = "1.4.8"/' \
     -e 's/description = ".*"/description = "BGDesk Remote Desktop"/' \
     "$ROOT/Cargo.toml" 2>/dev/null || \
   sed -i \
-    -e 's/^version = ".*"/version = "1.4.8"/' \
     -e 's/description = ".*"/description = "BGDesk Remote Desktop"/' \
     "$ROOT/Cargo.toml"
 
@@ -116,9 +114,7 @@ patch_lang_files() {
 patch_flutter() {
   log "flutter/: branding BGDesk"
 
-  # pubspec version
-  sed -i '' 's/^version: .*/version: 1.4.8+66/' "$ROOT/flutter/pubspec.yaml" 2>/dev/null || \
-  sed -i 's/^version: .*/version: 1.4.8+66/' "$ROOT/flutter/pubspec.yaml"
+  # Application revision/build number are managed together; never reset them here.
 
   # common.dart app name
   [[ -f "$ROOT/flutter/lib/common.dart" ]] && \
@@ -166,8 +162,8 @@ patch_flutter() {
 
 # --- libs/portable ---
 patch_portable() {
-  [[ -f "$ROOT/libs/portable/Cargo.toml" ]] && \
-    sed -i '' 's/^version = ".*"/version = "1.4.8"/' "$ROOT/libs/portable/Cargo.toml" 2>/dev/null || true
+  log "libs/portable: versão preservada; conferir manifests e locks juntos"
+
 }
 
 # --- lang.rs: trocar vn por vi se necessário ---

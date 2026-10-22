@@ -20,7 +20,8 @@ done
 # Reject a stale X11-only bundle or an incompatible capture library before packaging.
 python3 "$root/scripts/stage-linux-drm.py" "$bundle"
 version="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["package"]["version"])' "$root/Cargo.toml")"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid stable version' >&2; exit 1; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]] || { echo 'Invalid stable version' >&2; exit 1; }
+package_version="${version/-/.}"
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/bgdesk-arch.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 # Mount only public packaging inputs and the compiled payload, never .env/config.
@@ -40,12 +41,12 @@ docker run --rm --platform linux/amd64 --network none \
     cd /package
     runuser -u builder -- env BGDESK_EDITION="$BGDESK_EDITION" BGDESK_VERSION="$BGDESK_VERSION" \
       makepkg --nodeps --nocheck --noconfirm
-    package="bgdesk-$BGDESK_EDITION-$BGDESK_VERSION-1-x86_64.pkg.tar.zst"
+    package="bgdesk-$BGDESK_EDITION-${BGDESK_VERSION/-/.}-1-x86_64.pkg.tar.zst"
     pacman -Qip "$package"
     bsdtar -tf "$package" | grep -qx usr/lib/systemd/system/bgdesk.service
     bsdtar -tf "$package" | grep -qx .INSTALL
     bsdtar -tf "$package" | grep -qx usr/lib/bgdesk/libdrmtap.so.0
   '
 mkdir -p "$output"
-cp "$work/bgdesk-$edition-$version-1-x86_64.pkg.tar.zst" "$output/bgdesk-$edition-x86_64.pkg.tar.zst"
+cp "$work/bgdesk-$edition-$package_version-1-x86_64.pkg.tar.zst" "$output/bgdesk-$edition-x86_64.pkg.tar.zst"
 echo "Arch package: $output/bgdesk-$edition-x86_64.pkg.tar.zst"

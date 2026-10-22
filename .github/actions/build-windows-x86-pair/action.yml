@@ -1,5 +1,5 @@
 name: Build Win32 after Windows x64
-description: Reuse the same Windows runner for cliente then suporte without touching saved x64 artifacts
+description: Reuse the same Windows runner for cliente only without touching saved x64 artifacts
 runs:
   using: composite
   steps:
@@ -18,9 +18,3 @@ runs:
         platform: windows
         arch: x86
         edition: cliente
-    - name: Build, sign, and save Win32 suporte
-      uses: ./.github/actions/build-edition
-      with:
-        platform: windows
-        arch: x86
-        edition: suporte

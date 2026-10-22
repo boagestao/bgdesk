@@ -589,11 +589,6 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   if (isDefaultConn && isDesktop) {
     v.add(
       TTextMenu(
-          child: Text(translate('Transfer file')),
-          onPressed: () => connectWithToken(isFileTransfer: true)),
-    );
-    v.add(
-      TTextMenu(
           child: Text(translate('View camera')),
           onPressed: () => connectWithToken(isViewCamera: true)),
     );
@@ -678,9 +673,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   {
     v.add(TTextMenu(
         child: Obx(() => Text(translate(
-            '${BlockInputState.find(id).value ? 'Unb' : 'B'}lock user input'))),
+            '${BlockInputState.find(ffi.sharedStateId).value ? 'Unb' : 'B'}lock user input'))),
         onPressed: () {
-          RxBool blockInput = BlockInputState.find(id);
+          RxBool blockInput = BlockInputState.find(ffi.sharedStateId);
           bind.sessionToggleOption(
               sessionId: sessionId,
               value: '${blockInput.value ? 'un' : ''}block-input');
@@ -780,7 +775,8 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   if (!(isDesktop || isWebDesktop)) {
     v.add(TTextMenu(
       child: Text(translate('Copy Fingerprint')),
-      onPressed: () => onCopyFingerprint(FingerprintState.find(id).value),
+      onPressed: () =>
+          onCopyFingerprint(FingerprintState.find(ffi.sharedStateId).value),
     ));
   }
   // Register tagged TTextMenu callbacks. The else-unregister is defense in
@@ -808,26 +804,29 @@ Future<List<TRadioMenu<String>>> toolbarViewStyle(
         .then((_) => ffi.canvasModel.updateViewStyle());
   }
 
-  return _registerRadioMenuShortcuts(ffi, [
-    TRadioMenu<String>(
-        child: Text(translate('Scale original')),
-        value: kRemoteViewStyleOriginal,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionViewModeOriginal),
-    TRadioMenu<String>(
-        child: Text(translate('Scale adaptive')),
-        value: kRemoteViewStyleAdaptive,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionViewModeAdaptive),
-    TRadioMenu<String>(
-        child: Text(translate('Scale custom')),
-        value: kRemoteViewStyleCustom,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionViewModeCustom)
-  ], ownedActionIds: _kToolbarViewStyleActionIds);
+  return _registerRadioMenuShortcuts(
+      ffi,
+      [
+        TRadioMenu<String>(
+            child: Text(translate('Scale original')),
+            value: kRemoteViewStyleOriginal,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionViewModeOriginal),
+        TRadioMenu<String>(
+            child: Text(translate('Scale adaptive')),
+            value: kRemoteViewStyleAdaptive,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionViewModeAdaptive),
+        TRadioMenu<String>(
+            child: Text(translate('Scale custom')),
+            value: kRemoteViewStyleCustom,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionViewModeCustom)
+      ],
+      ownedActionIds: _kToolbarViewStyleActionIds);
 }
 
 Future<List<TRadioMenu<String>>> toolbarImageQuality(
@@ -839,35 +838,38 @@ Future<List<TRadioMenu<String>>> toolbarImageQuality(
     await bind.sessionSetImageQuality(sessionId: ffi.sessionId, value: value);
   }
 
-  return _registerRadioMenuShortcuts(ffi, [
-    TRadioMenu<String>(
-        child: Text(translate('Good image quality')),
-        value: kRemoteImageQualityBest,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionImageQualityBest),
-    TRadioMenu<String>(
-        child: Text(translate('Balanced')),
-        value: kRemoteImageQualityBalanced,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionImageQualityBalanced),
-    TRadioMenu<String>(
-        child: Text(translate('Optimize reaction time')),
-        value: kRemoteImageQualityLow,
-        groupValue: groupValue,
-        onChanged: onChanged,
-        actionId: kShortcutActionImageQualityLow),
-    TRadioMenu<String>(
-      child: Text(translate('Custom')),
-      value: kRemoteImageQualityCustom,
-      groupValue: groupValue,
-      onChanged: (value) {
-        onChanged(value);
-        customImageQualityDialog(ffi.sessionId, id, ffi);
-      },
-    ),
-  ], ownedActionIds: _kToolbarImageQualityActionIds);
+  return _registerRadioMenuShortcuts(
+      ffi,
+      [
+        TRadioMenu<String>(
+            child: Text(translate('Good image quality')),
+            value: kRemoteImageQualityBest,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionImageQualityBest),
+        TRadioMenu<String>(
+            child: Text(translate('Balanced')),
+            value: kRemoteImageQualityBalanced,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionImageQualityBalanced),
+        TRadioMenu<String>(
+            child: Text(translate('Optimize reaction time')),
+            value: kRemoteImageQualityLow,
+            groupValue: groupValue,
+            onChanged: onChanged,
+            actionId: kShortcutActionImageQualityLow),
+        TRadioMenu<String>(
+          child: Text(translate('Custom')),
+          value: kRemoteImageQualityCustom,
+          groupValue: groupValue,
+          onChanged: (value) {
+            onChanged(value);
+            customImageQualityDialog(ffi.sessionId, id, ffi);
+          },
+        ),
+      ],
+      ownedActionIds: _kToolbarImageQualityActionIds);
 }
 
 Future<List<TRadioMenu<String>>> toolbarCodec(
@@ -920,14 +922,19 @@ Future<List<TRadioMenu<String>>> toolbarCodec(
       ffi.qualityMonitorModel.data.codecFormat != null) {
     autoLabel = '$autoLabel (${ffi.qualityMonitorModel.data.codecFormat})';
   }
-  return _registerRadioMenuShortcuts(ffi, [
-    radio(autoLabel, 'auto', true, kShortcutActionCodecAuto),
-    if (codecs[0]) radio('VP8', 'vp8', codecs[0], kShortcutActionCodecVp8),
-    radio('VP9', 'vp9', true, kShortcutActionCodecVp9),
-    if (codecs[1]) radio('AV1', 'av1', codecs[1], kShortcutActionCodecAv1),
-    if (codecs[2]) radio('H264', 'h264', codecs[2], kShortcutActionCodecH264),
-    if (codecs[3]) radio('H265', 'h265', codecs[3], kShortcutActionCodecH265),
-  ], ownedActionIds: _kToolbarCodecActionIds);
+  return _registerRadioMenuShortcuts(
+      ffi,
+      [
+        radio(autoLabel, 'auto', true, kShortcutActionCodecAuto),
+        if (codecs[0]) radio('VP8', 'vp8', codecs[0], kShortcutActionCodecVp8),
+        radio('VP9', 'vp9', true, kShortcutActionCodecVp9),
+        if (codecs[1]) radio('AV1', 'av1', codecs[1], kShortcutActionCodecAv1),
+        if (codecs[2])
+          radio('H264', 'h264', codecs[2], kShortcutActionCodecH264),
+        if (codecs[3])
+          radio('H265', 'h265', codecs[3], kShortcutActionCodecH265),
+      ],
+      ownedActionIds: _kToolbarCodecActionIds);
 }
 
 Future<List<TToggleMenu>> toolbarCursor(
@@ -941,8 +948,8 @@ Future<List<TToggleMenu>> toolbarCursor(
   if (pi.platform != kPeerPlatformAndroid &&
       !ffi.canvasModel.cursorEmbedded &&
       !pi.isWayland) {
-    final state = ShowRemoteCursorState.find(id);
-    final lockState = ShowRemoteCursorLockState.find(id);
+    final state = ShowRemoteCursorState.find(ffi.sharedStateId);
+    final lockState = ShowRemoteCursorLockState.find(ffi.sharedStateId);
     final enabled = !ffiModel.viewOnly;
     final option = 'show-remote-cursor';
     if (pi.currentDisplay == kAllDisplayValue ||
@@ -975,8 +982,9 @@ Future<List<TToggleMenu>> toolbarCursor(
     final value =
         bind.sessionGetToggleOptionSync(sessionId: sessionId, arg: option);
     final showCursorOption = 'show-remote-cursor';
-    final showCursorState = ShowRemoteCursorState.find(id);
-    final showCursorLockState = ShowRemoteCursorLockState.find(id);
+    final showCursorState = ShowRemoteCursorState.find(ffi.sharedStateId);
+    final showCursorLockState =
+        ShowRemoteCursorLockState.find(ffi.sharedStateId);
     final showCursorEnabled = bind.sessionGetToggleOptionSync(
         sessionId: sessionId, arg: showCursorOption);
     showCursorLockState.value = value;
@@ -1032,7 +1040,7 @@ Future<List<TToggleMenu>> toolbarCursor(
       pi.platform != kPeerPlatformAndroid &&
       viewStyle != kRemoteViewStyleOriginal) {
     final option = 'zoom-cursor';
-    final peerState = PeerBoolOption.find(id, option);
+    final peerState = PeerBoolOption.find(ffi.sharedStateId, option);
     v.add(TToggleMenu(
       child: Text(translate('Zoom cursor')),
       value: peerState.value,
@@ -1147,8 +1155,9 @@ Future<List<TToggleMenu>> toolbarDisplayToggle(
         child: Text(translate('Lock after session end'))));
   }
 
-  final privacyModeState = PrivacyModeState.find(id);
-  if (pi.isSupportMultiDisplay &&
+  final privacyModeState = PrivacyModeState.find(ffi.sharedStateId);
+  if (!usesUnifiedSessionTabs &&
+      pi.isSupportMultiDisplay &&
       (privacyModeState.isEmpty ||
           allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
       pi.displaysCount.value > 1 &&
@@ -1444,7 +1453,8 @@ void registerToolbarShortcuts(BuildContext context, String id, FFI ffi) {
   register(_kToolbarCursorActionIds, () => toolbarCursor(context, id, ffi));
   register(_kToolbarDisplayToggleActionIds,
       () => toolbarDisplayToggle(context, id, ffi));
-  register(_kToolbarViewStyleActionIds, () => toolbarViewStyle(context, id, ffi));
+  register(
+      _kToolbarViewStyleActionIds, () => toolbarViewStyle(context, id, ffi));
   register(_kToolbarImageQualityActionIds,
       () => toolbarImageQuality(context, id, ffi));
   register(_kToolbarCodecActionIds, () => toolbarCodec(context, id, ffi));
@@ -1455,7 +1465,8 @@ void registerToolbarShortcuts(BuildContext context, String id, FFI ffi) {
   unawaited(toolbarViewStyle(context, id, ffi));
   unawaited(toolbarImageQuality(context, id, ffi));
   unawaited(toolbarCodec(context, id, ffi));
-  toolbarPrivacyMode(PrivacyModeState.find(id), context, id, ffi);
+  toolbarPrivacyMode(
+      PrivacyModeState.find(ffi.sharedStateId), context, id, ffi);
 }
 
 bool showVirtualDisplayMenu(FFI ffi) {
@@ -1477,7 +1488,7 @@ List<Widget> getVirtualDisplayMenuChildren(
     return [];
   }
   final pi = ffi.ffiModel.pi;
-  final privacyModeState = PrivacyModeState.find(id);
+  final privacyModeState = PrivacyModeState.find(ffi.sharedStateId);
   if (pi.isRustDeskIdd) {
     final virtualDisplays = ffi.ffiModel.pi.RustDeskVirtualDisplays;
     final children = <Widget>[];

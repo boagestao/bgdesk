@@ -58,6 +58,7 @@ class FileManagerPage extends StatefulWidget {
       required this.password,
       required this.isSharedPassword,
       this.tabController,
+      this.tabKey,
       this.connToken,
       this.forceRelay})
       : super(key: key);
@@ -67,9 +68,15 @@ class FileManagerPage extends StatefulWidget {
   final bool? forceRelay;
   final String? connToken;
   final DesktopTabController? tabController;
+  final String? tabKey;
   final SimpleWrapper<State<FileManagerPage>?> _lastState = SimpleWrapper(null);
 
   FFI get ffi => (_lastState.value! as _FileManagerPageState)._ffi;
+  Future<void> closeSession() =>
+      (_lastState.value as _FileManagerPageState?)?._closeSession() ??
+      Future.value();
+
+  FFI? get initializedFfi => (_lastState.value as _FileManagerPageState?)?._ffi;
 
   @override
   State<StatefulWidget> createState() {
@@ -96,6 +103,7 @@ class _FileManagerPageState extends State<FileManagerPage>
   void initState() {
     super.initState();
     _ffi = FFI(null);
+    _ffi.tabKey = widget.tabKey;
     _ffi.start(widget.id,
         isFileTransfer: true,
         password: widget.password,
@@ -103,10 +111,14 @@ class _FileManagerPageState extends State<FileManagerPage>
         connToken: widget.connToken,
         forceRelay: widget.forceRelay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      _ffi.dialogManager.showLoading(translate('Connecting...'),
+          onCancel: () => closeConnection(sessionId: _ffi.sessionId));
     });
-    Get.put<FFI>(_ffi, tag: 'ft_${widget.id}');
+    if (Get.isRegistered<FFI>(tag: 'ft_${widget.id}')) {
+      Get.replace<FFI>(_ffi, tag: 'ft_${widget.id}');
+    } else {
+      Get.put<FFI>(_ffi, tag: 'ft_${widget.id}');
+    }
     WakelockManager.enable(_uniqueKey);
     if (isWeb) {
       _ffi.ffiModel.updateEventListener(_ffi.sessionId, widget.id);
@@ -115,19 +127,29 @@ class _FileManagerPageState extends State<FileManagerPage>
     _ffi.dialogManager.setOverlayState(_overlayKeyState);
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController?.onSelected?.call(widget.id);
+      widget.tabController?.onSelected?.call(widget.tabKey ?? widget.id);
     });
     WidgetsBinding.instance.addObserver(this);
   }
 
+  Future<void>? _closeFuture;
+  Future<void> _closeSession() => _closeFuture ??= () async {
+        try {
+          await model.close();
+        } finally {
+          await _ffi.close();
+          _ffi.dialogManager.dismissAll();
+          WakelockManager.disable(_uniqueKey);
+          if (Get.isRegistered<FFI>(tag: 'ft_${widget.id}') &&
+              identical(Get.find<FFI>(tag: 'ft_${widget.id}'), _ffi)) {
+            Get.delete<FFI>(tag: 'ft_${widget.id}');
+          }
+        }
+      }();
+
   @override
   void dispose() {
-    model.close().whenComplete(() {
-      _ffi.close();
-      _ffi.dialogManager.dismissAll();
-      WakelockManager.disable(_uniqueKey);
-      Get.delete<FFI>(tag: 'ft_${widget.id}');
-    });
+    unawaited(_closeSession());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

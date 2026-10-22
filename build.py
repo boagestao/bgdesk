@@ -19,6 +19,8 @@ from pathlib import Path
 # stays relative (bpo-20443), so abspath() re-resolves it against the cwd -- and the ubuntu18.04
 # packaging container runs 3.6 and chdir's into flutter/ before it reaches the libdrmtap code.
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(REPO_ROOT, "res", "update"))
+from application_version import base_version, stamp_macos_bundle
 
 windows = platform.platform().startswith('Windows')
 osx = platform.platform().startswith(
@@ -1081,7 +1083,8 @@ def build_flutter_dmg(version, features):
         system2(f'{flutter} pub get')
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES '
-        f'FLUTTER_XCODE_CODE_SIGNING_ALLOWED=NO {flutter} build macos --release{local_flags}')
+        f'FLUTTER_XCODE_CODE_SIGNING_ALLOWED=NO {flutter} build macos --release --build-name={base_version(version)}{local_flags}')
+    stamp_macos_bundle('build/macos/Build/Products/Release/BGDesk.app/Contents/Info.plist', version)
     write_flutter_build_stamp()
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/BGDesk.app/Contents/MacOS/')
     '''

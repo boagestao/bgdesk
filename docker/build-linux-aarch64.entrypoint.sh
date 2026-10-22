@@ -187,7 +187,7 @@ build_rpm() {
   mkdir -p "${work}"
   local spec="${work}/bgdesk.spec"
   cp res/rpm-flutter.spec "${spec}"
-  sed -i "s/^Version:.*/Version:    ${VERSION}/" "${spec}"
+  sed -i "s/^Version:.*/Version:    ${VERSION/-/.}/" "${spec}"
   if [[ "${bundle}" == *"/arm64/"* ]]; then
     sed -i 's|linux/x64|linux/arm64|g' "${spec}"
   fi

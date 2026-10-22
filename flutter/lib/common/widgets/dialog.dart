@@ -25,7 +25,7 @@ void clientClose(SessionID sessionId, FFI ffi) async {
     if (await showConnEndAuditDialogCloseCanceled(ffi: ffi)) {
       return;
     }
-    closeConnection();
+    closeConnection(sessionId: sessionId);
   } else {
     msgBox(sessionId, 'info', 'Close', 'Are you sure to close the connection?',
         '', ffi.dialogManager);
@@ -901,7 +901,7 @@ void wrongPasswordDialog(SessionID sessionId,
   dialogManager.show((setState, close, context) {
     cancel() {
       close();
-      closeConnection();
+      closeConnection(sessionId: sessionId);
     }
 
     submit() {
@@ -985,7 +985,7 @@ _connectDialog(
   dialogManager.show((setState, close, context) {
     cancel() {
       close();
-      closeConnection();
+      closeConnection(sessionId: sessionId);
     }
 
     submit() {
@@ -1009,7 +1009,7 @@ _connectDialog(
       );
       close();
       dialogManager.showLoading(translate('Logging in...'),
-          onCancel: closeConnection);
+          onCancel: () => closeConnection(sessionId: sessionId));
     }
 
     descWidget(String text) {
@@ -1386,7 +1386,7 @@ void showWaitAcceptDialog(SessionID sessionId, String type, String title,
   dialogManager.dismissAll();
   dialogManager.show((setState, close, context) {
     onCancel() {
-      closeConnection();
+      closeConnection(sessionId: sessionId);
     }
 
     return CustomAlertDialog(
@@ -1605,12 +1605,15 @@ bool allowAskForNoteAtEndOfConnection(FFI? ffi, bool closedByControlling) {
 //  true: return
 //  false: go on
 Future<bool> desktopTryShowTabAuditDialogCloseCancelled(
-    {required String id, required DesktopTabController tabController}) async {
+    {required String id,
+    required DesktopTabController tabController,
+    bool forceGlobal = false}) async {
   try {
     final page =
         tabController.state.value.tabs.firstWhere((tab) => tab.key == id).page;
     final ffi = (page as dynamic).ffi;
-    final res = await showConnEndAuditDialogCloseCanceled(ffi: ffi);
+    final res = await showConnEndAuditDialogCloseCanceled(
+        ffi: ffi, forceGlobal: forceGlobal);
     return res;
   } catch (e) {
     debugPrint('Failed to show audit dialog: $e');
@@ -1622,9 +1625,13 @@ Future<bool> desktopTryShowTabAuditDialogCloseCancelled(
 //  true: return
 //  false: go on
 Future<bool> showConnEndAuditDialogCloseCanceled(
-    {required FFI ffi, String? type, String? title, String? text}) async {
+    {required FFI ffi,
+    String? type,
+    String? title,
+    String? text,
+    bool forceGlobal = false}) async {
   final res = await _showConnEndAuditDialogCloseCanceled(
-      ffi: ffi, type: type, title: title, text: text);
+      ffi: ffi, type: type, title: title, text: text, forceGlobal: forceGlobal);
   if (res == true) {
     return true;
   }
@@ -1639,6 +1646,7 @@ Future<bool?> _showConnEndAuditDialogCloseCanceled({
   String? type,
   String? title,
   String? text,
+  bool forceGlobal = false,
 }) async {
   final closedByControlling = type == null;
   final showDialog = allowAskForNoteAtEndOfConnection(ffi, closedByControlling);
@@ -1686,7 +1694,8 @@ Future<bool?> _showConnEndAuditDialogCloseCanceled({
   final isOptFixed = isOptionFixed(kOptionAllowAskForNoteAtEndOfConnection);
   bool isInProgress = false;
 
-  return await ffi.dialogManager.show<bool>((setState, close, context) {
+  return await ffi.dialogManager.show<bool>(forceGlobal: forceGlobal,
+      (setState, close, context) {
     cancel() {
       close(true);
     }
@@ -1809,7 +1818,7 @@ void showConfirmSwitchSidesDialog(
   dialogManager.show((setState, close, context) {
     submit() async {
       await bind.sessionSwitchSides(sessionId: sessionId);
-      closeConnection(id: id);
+      closeConnection(id: id, sessionId: sessionId);
     }
 
     return CustomAlertDialog(
@@ -2353,14 +2362,14 @@ void enter2FaDialog(
   dialogManager.show((setState, close, context) {
     cancel() {
       close();
-      closeConnection();
+      closeConnection(sessionId: sessionId);
     }
 
     submit() {
       gFFI.send2FA(sessionId, controller.text.trim(), trustThisDevice.value);
       close();
       dialogManager.showLoading(translate('Logging in...'),
-          onCancel: closeConnection);
+          onCancel: () => closeConnection(sessionId: sessionId));
     }
 
     late Dialog2FaField codeField;

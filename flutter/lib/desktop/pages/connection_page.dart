@@ -192,11 +192,11 @@ class ConnectionPage extends StatefulWidget {
   const ConnectionPage({Key? key}) : super(key: key);
 
   @override
-  State<ConnectionPage> createState() => _ConnectionPageState();
+  State<ConnectionPage> createState() => ConnectionPageState();
 }
 
 /// State for the connection page.
-class _ConnectionPageState extends State<ConnectionPage>
+class ConnectionPageState extends State<ConnectionPage>
     with SingleTickerProviderStateMixin, WindowListener {
   /// Controller for the id input bar.
   final _idController = IDTextEditingController();
@@ -204,6 +204,14 @@ class _ConnectionPageState extends State<ConnectionPage>
   final RxBool _idInputFocused = false.obs;
   final FocusNode _idFocusNode = FocusNode();
   final TextEditingController _idEditingController = TextEditingController();
+  bool _restoreLastRemoteId = true;
+
+  void prepareNewConnection() {
+    _restoreLastRemoteId = false;
+    _idController.clear();
+    _idEditingController.clear();
+    _idFocusNode.requestFocus();
+  }
 
   String selectedConnectionType = 'Connect';
 
@@ -224,7 +232,7 @@ class _ConnectionPageState extends State<ConnectionPage>
     if (_idController.text.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         final lastRemoteId = await bind.mainGetLastRemoteId();
-        if (lastRemoteId != _idController.id) {
+        if (mounted && _restoreLastRemoteId && _idController.text.isEmpty) {
           setState(() {
             _idController.id = lastRemoteId;
           });

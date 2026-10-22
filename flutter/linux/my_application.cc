@@ -19,11 +19,20 @@ void try_set_transparent(GtkWindow* window, GdkScreen* screen, FlView* view);
 
 extern bool gIsConnectionManager;
 
+// Keep the incoming connection manager distinct from the main window for
+// compositor rules, on both native Wayland (app_id) and X11/XWayland (WM_CLASS).
+static constexpr char kConnectionManagerApplicationId[] =
+    "bgdesk.connection-manager";
+
 GtkWidget *find_gl_area(GtkWidget *widget);
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  if (gIsConnectionManager) {
+    // GtkWindow copies the program class at construction, before its first map.
+    gdk_set_program_class(kConnectionManagerApplicationId);
+  }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   gtk_window_set_decorated(window, FALSE);
@@ -125,8 +134,15 @@ static void my_application_class_init(MyApplicationClass* klass) {
 static void my_application_init(MyApplication* self) {}
 
 MyApplication* my_application_new() {
+  if (gIsConnectionManager) {
+    // GTK 3's Wayland backend uses the program name for xdg_toplevel.app_id.
+    // Set it before GApplication startup and before creating any windows.
+    g_set_prgname(kConnectionManagerApplicationId);
+  }
   return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", APPLICATION_ID,
+                                     "application-id", gIsConnectionManager
+                                         ? kConnectionManagerApplicationId
+                                         : APPLICATION_ID,
                                      "flags", G_APPLICATION_NON_UNIQUE,
                                      nullptr));
 }

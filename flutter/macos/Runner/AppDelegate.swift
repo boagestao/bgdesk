@@ -23,7 +23,14 @@ class AppDelegate: FlutterAppDelegate {
 
     override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !hasVisibleAppWindows() {
-            NSApplication.shared.terminate(nil)
+            // A hidden main window can still own live remote/file-transfer tabs.
+            // Reopening from the Dock restores it instead of terminating them.
+            if let window = mainFlutterWindow ?? NSApplication.shared.windows.first(where: { $0 is MainFlutterWindow }) {
+                window.deminiaturize(sender)
+                window.makeKeyAndOrderFront(sender)
+                sender.activate(ignoringOtherApps: true)
+                return true
+            }
             return false
         }
         if (launched) {

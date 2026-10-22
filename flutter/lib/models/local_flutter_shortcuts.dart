@@ -60,6 +60,14 @@ class LocalFlutterShortcutDispatcher {
     }
   }
 
+  /// Release using the encoding/session captured on keydown, even after focus,
+  /// permissions or keyboard mode have changed. Remove ownership synchronously.
+  Future<void> releaseForwardedKeys() {
+    final releases = _forwardedKeyReleases.values.toList();
+    _forwardedKeyReleases.clear();
+    return Future.wait(releases.map((release) => Future<void>.sync(release)));
+  }
+
   bool resumeModifiersAfterViewOnly(
       PhysicalKeyboardKey incoming, Set<PhysicalKeyboardKey> pressed) {
     if (!_viewOnlyShortcutPending) return false;
@@ -199,9 +207,7 @@ class LocalFlutterShortcutDispatcher {
           _forwardedKeyReleases.isNotEmpty) {
         // Focus changes and view-only can keep physical keyups from the peer.
         // Mode changes can encode later keyups differently from their keydowns.
-        final releases = _forwardedKeyReleases.values.toList();
-        _forwardedKeyReleases.clear();
-        await Future.wait(releases.map((release) => Future<void>.sync(release)));
+        await releaseForwardedKeys();
       }
       if (generation == _generation) onTriggered(action);
     } catch (e, st) {

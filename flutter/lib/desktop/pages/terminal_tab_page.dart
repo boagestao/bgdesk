@@ -37,8 +37,13 @@ class TerminalTabPage extends StatefulWidget {
   State<TerminalTabPage> createState() => _TerminalTabPageState(params);
 }
 
-class _TerminalTabPageState extends State<TerminalTabPage> {
-  DesktopTabController get tabController => Get.find<DesktopTabController>();
+/// Shared terminal behavior for the main support host and legacy terminal windows.
+/// In the main host this never installs an IPC handler or owns the whole tab bar.
+mixin TerminalTabsMixin<T extends StatefulWidget> on State<T> {
+  DesktopTabController get tabController;
+  int windowId();
+  bool get unifiedTerminalTabs => false;
+  bool get terminalOperationsBlocked => _windowClosing;
   bool get _canConfigureTerminalClipboardPermission =>
       canConfigureTerminalClipboardPermission(
         settingsDisabled: bind.isDisableSettings(),
@@ -63,28 +68,6 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   final _terminalClipboardNotice =
       TerminalClipboardNoticeCoordinator<_TerminalClipboardSource>();
 
-  _TerminalTabPageState(Map<String, dynamic> params) {
-    Get.put(DesktopTabController(tabType: DesktopTabType.terminal));
-    tabController.onSelected = (id) {
-      WindowController.fromWindowId(windowId())
-          .setTitle(getWindowNameWithId(id));
-    };
-    tabController.onRemoved = (_, id) {
-      _closeTerminalClipboardNoticeForTab(id);
-      onRemoveId(id);
-    };
-    tabController.onCloseWindow = _closeWindowFromConnection;
-    final terminalId = params['terminalId'] ?? _nextTerminalId++;
-    tabController.add(_createTerminalTab(
-      peerId: params['id'],
-      terminalId: terminalId,
-      password: params['password'],
-      isSharedPassword: params['isSharedPassword'],
-      forceRelay: params['forceRelay'],
-      connToken: params['connToken'],
-    ));
-  }
-
   TabInfo _createTerminalTab({
     required String peerId,
     required int terminalId,
@@ -93,7 +76,8 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     bool? forceRelay,
     String? connToken,
   }) {
-    final tabKey = '${peerId}_$terminalId';
+    final tabKey =
+        '${unifiedTerminalTabs ? 'terminal:' : ''}${peerId}_$terminalId';
     final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
     final tabLabel =
         alias.isNotEmpty ? '$alias #$terminalId' : '$peerId #$terminalId';
@@ -102,32 +86,35 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       terminalId: terminalId,
       tabKey: tabKey,
     );
+    final page = TerminalPage(
+      key: ValueKey(tabKey),
+      id: peerId,
+      terminalId: terminalId,
+      tabKey: tabKey,
+      password: password,
+      isSharedPassword: isSharedPassword,
+      tabController: tabController,
+      forceRelay: forceRelay,
+      connToken: connToken,
+      onClipboardWriteBlocked: _canHandleTerminalClipboardWriteRequest
+          ? (text) => _handleTerminalClipboardWriteBlocked(
+                clipboardSource,
+                text,
+              )
+          : null,
+      onClipboardWriteSucceeded: (_) {
+        _handleTerminalClipboardWriteSucceeded(clipboardSource);
+      },
+    );
     return TabInfo(
       key: tabKey,
       label: tabLabel,
       selectedIcon: selectedIcon,
       unselectedIcon: unselectedIcon,
       onTabCloseButton: () => _closeTab(tabKey),
-      page: TerminalPage(
-        key: ValueKey(tabKey),
-        id: peerId,
-        terminalId: terminalId,
-        tabKey: tabKey,
-        password: password,
-        isSharedPassword: isSharedPassword,
-        tabController: tabController,
-        forceRelay: forceRelay,
-        connToken: connToken,
-        onClipboardWriteBlocked: _canHandleTerminalClipboardWriteRequest
-            ? (text) => _handleTerminalClipboardWriteBlocked(
-                  clipboardSource,
-                  text,
-                )
-            : null,
-        onClipboardWriteSucceeded: (_) {
-          _handleTerminalClipboardWriteSucceeded(clipboardSource);
-        },
-      ),
+      page: page,
+      sessionId: () => page.initializedFfi?.sessionId,
+      onDeactivate: page.deactivateInput,
     );
   }
 
@@ -330,17 +317,18 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
 
   /// Close all tabs with session cleanup.
   /// Used for window-level close operations (onDestroy, handleWindowCloseButton).
-  /// UI tabs are removed immediately; session cleanup runs in parallel with a
-  /// bounded timeout so window close is not blocked indefinitely.
+  /// Shell cleanup runs before the last shared FFI is released, with a bounded
+  /// timeout so window close is not blocked indefinitely.
   Future<void> _closeAllTabs() async {
     _windowClosing = true;
-    final tabKeys = tabController.state.value.tabs.map((t) => t.key).toList();
-    // Remove all UI tabs immediately (same instant behavior as the old tabController.clear())
-    // Keep the cleanup target lookup below synchronous before its first await:
-    // it relies on the current frame still retaining each TerminalPage's FFI/model.
+    final tabKeys = tabController.state.value.tabs
+        .where((t) => t.page is TerminalPage)
+        .map((t) => t.key)
+        .toList();
     _terminalClipboardNotice.clear();
     _terminalClipboardNoticeCancel?.call();
-    tabController.clear();
+    // Finish shell cleanup before disposal releases the last shared connection.
+
     // Run session cleanup in parallel with bounded timeout (closeTerminal() has internal 3s timeout).
     // Skip tabs already being closed by a concurrent _closeTab() to avoid duplicate FFI calls.
     final futures = tabKeys
@@ -362,6 +350,36 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
         },
       );
     }
+    for (final key in tabKeys) tabController.closeBy(key);
+    _windowClosing = false;
+  }
+
+  void onTerminalTabRemoved(String key) =>
+      _closeTerminalClipboardNoticeForTab(key);
+
+  Future<void> closeAllTerminalTabs() => _closeAllTabs();
+
+  void openTerminalSession(Map<String, dynamic> args) {
+    if (terminalOperationsBlocked) return;
+    final terminalId = args['terminalId'] as int? ?? _nextTerminalId++;
+    if (terminalId >= _nextTerminalId) _nextTerminalId = terminalId + 1;
+    tabController.add(_createTerminalTab(
+      peerId: args['id'],
+      terminalId: terminalId,
+      password: args['password'],
+      isSharedPassword: args['isSharedPassword'],
+      forceRelay: args['forceRelay'],
+      connToken: args['connToken'],
+    ));
+  }
+
+  Future<void> restoreTerminalSessions(String args) => _restoreSessions(args);
+
+  Widget terminalTabMenu(String key) {
+    final parsed = _parseTabKey(key);
+    return parsed == null
+        ? const SizedBox.shrink()
+        : _tabMenuBuilder(parsed.$1, () {});
   }
 
   /// Close the terminal session on server side based on persistent mode.
@@ -423,6 +441,10 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   /// Note: peerId may contain underscores, so we use lastIndexOf('_').
   /// Returns null if tabKey format is invalid.
   (String peerId, int terminalId)? _parseTabKey(String tabKey) {
+    if (unifiedTerminalTabs) {
+      if (!tabKey.startsWith('terminal:')) return null;
+      tabKey = tabKey.substring('terminal:'.length);
+    }
     final lastUnderscore = tabKey.lastIndexOf('_');
     if (lastUnderscore <= 0) {
       debugPrint('[TerminalTabPage] Invalid tabKey format: $tabKey');
@@ -501,6 +523,7 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     // Add keyboard shortcut handler
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
 
+    if (unifiedTerminalTabs) return;
     rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
       print(
           "[Remote Terminal] call ${call.method} with args ${call.arguments} from window $fromWindowId");
@@ -579,6 +602,11 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       if (parsed == null) return;
       peerId = parsed.$1;
     }
+    final seed = TerminalConnectionManager.getExistingConnection(peerId);
+    if (seed == null ||
+        seed.closed ||
+        (args['session_id'] != null &&
+            args['session_id'] != seed.sessionId.toString())) return;
     final existingTerminalIds = tabController.state.value.tabs
         .map((tab) => _parseTabKey(tab.key))
         .where((parsed) => parsed != null && parsed.$1 == peerId)
@@ -590,6 +618,12 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       return;
     }
     for (final terminalId in sortedSessions) {
+      if (!mounted ||
+          terminalOperationsBlocked ||
+          seed.closed ||
+          !identical(
+              seed, TerminalConnectionManager.getExistingConnection(peerId)))
+        return;
       if (!existingTerminalIds.add(terminalId)) {
         continue;
       }
@@ -608,6 +642,9 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   }
 
   bool _handleKeyEvent(KeyEvent event) {
+    if (terminalOperationsBlocked) return false;
+    if (unifiedTerminalTabs && tabController.selectedTab?.page is! TerminalPage)
+      return false;
     if (event is KeyDownEvent) {
       // Use Cmd+T on macOS, Ctrl+Shift+T on other platforms
       if (event.logicalKey == LogicalKeyboardKey.keyT) {
@@ -696,11 +733,11 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   }
 
   void _addNewTerminal(String peerId, {int? terminalId}) {
+    if (terminalOperationsBlocked) return;
     // Find first tab for this peer to get connection parameters
     final firstTab = tabController.state.value.tabs.firstWhere(
       (tab) {
-        final last = tab.key.lastIndexOf('_');
-        return last > 0 && tab.key.substring(0, last) == peerId;
+        return _parseTabKey(tab.key)?.$1 == peerId;
       },
     );
     if (firstTab.page is TerminalPage) {
@@ -728,44 +765,8 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     _addNewTerminal(peerId, terminalId: terminalId);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final child = Scaffold(
-        backgroundColor: Theme.of(context).cardColor,
-        body: DesktopTab(
-          controller: tabController,
-          onWindowCloseButton: handleWindowCloseButton,
-          tail: _buildAddButton(),
-          selectedBorderColor: MyTheme.accent,
-          labelGetter: DesktopTab.tablabelGetter,
-          tabMenuBuilder: (key) {
-            final parsed = _parseTabKey(key);
-            if (parsed == null) return Container();
-            final (peerId, _) = parsed;
-            return _tabMenuBuilder(peerId, () {});
-          },
-        ));
-    final tabWidget = isLinux
-        ? buildVirtualWindowFrame(context, child)
-        : workaroundWindowBorder(
-            context,
-            Container(
-              decoration: BoxDecoration(
-                  border: Border.all(color: MyTheme.color(context).border!)),
-              child: child,
-            ));
-    return isMacOS || kUseCompatibleUiMode
-        ? tabWidget
-        : SubWindowDragToResizeArea(
-            child: tabWidget,
-            resizeEdgeSize: stateGlobal.resizeEdgeSize.value,
-            enableResizeEdges: subWindowManagerEnableResizeEdges,
-            windowId: stateGlobal.windowId,
-          );
-  }
-
   void onRemoveId(String id) {
-    if (tabController.state.value.tabs.isEmpty) {
+    if (!unifiedTerminalTabs && tabController.state.value.tabs.isEmpty) {
       WindowController.fromWindowId(windowId()).close();
     }
   }
@@ -773,10 +774,6 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   Future<void> _closeWindowFromConnection() async {
     await _closeAllTabs();
     await WindowController.fromWindowId(windowId()).close();
-  }
-
-  int windowId() {
-    return widget.params["windowId"];
   }
 
   Widget _buildAddButton() {
@@ -817,4 +814,71 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       return res;
     }
   }
+}
+
+class _TerminalTabPageState extends State<TerminalTabPage>
+    with TerminalTabsMixin<TerminalTabPage> {
+  @override
+  DesktopTabController get tabController => Get.find<DesktopTabController>();
+
+  _TerminalTabPageState(Map<String, dynamic> params) {
+    Get.put(DesktopTabController(tabType: DesktopTabType.terminal));
+    tabController.onSelected = (id) {
+      WindowController.fromWindowId(windowId())
+          .setTitle(getWindowNameWithId(id));
+    };
+    tabController.onRemoved = (_, id) {
+      _closeTerminalClipboardNoticeForTab(id);
+      onRemoveId(id);
+    };
+    tabController.onCloseWindow = _closeWindowFromConnection;
+    final terminalId = params['terminalId'] ?? _nextTerminalId++;
+    tabController.add(_createTerminalTab(
+      peerId: params['id'],
+      terminalId: terminalId,
+      password: params['password'],
+      isSharedPassword: params['isSharedPassword'],
+      forceRelay: params['forceRelay'],
+      connToken: params['connToken'],
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Scaffold(
+        backgroundColor: Theme.of(context).cardColor,
+        body: DesktopTab(
+          controller: tabController,
+          onWindowCloseButton: handleWindowCloseButton,
+          tail: _buildAddButton(),
+          selectedBorderColor: MyTheme.accent,
+          labelGetter: DesktopTab.tablabelGetter,
+          tabMenuBuilder: (key) {
+            final parsed = _parseTabKey(key);
+            if (parsed == null) return Container();
+            final (peerId, _) = parsed;
+            return _tabMenuBuilder(peerId, () {});
+          },
+        ));
+    final tabWidget = isLinux
+        ? buildVirtualWindowFrame(context, child)
+        : workaroundWindowBorder(
+            context,
+            Container(
+              decoration: BoxDecoration(
+                  border: Border.all(color: MyTheme.color(context).border!)),
+              child: child,
+            ));
+    return isMacOS || kUseCompatibleUiMode
+        ? tabWidget
+        : SubWindowDragToResizeArea(
+            child: tabWidget,
+            resizeEdgeSize: stateGlobal.resizeEdgeSize.value,
+            enableResizeEdges: subWindowManagerEnableResizeEdges,
+            windowId: stateGlobal.windowId,
+          );
+  }
+
+  @override
+  int windowId() => widget.params['windowId'];
 }

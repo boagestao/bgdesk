@@ -35,6 +35,9 @@ class TabInfo {
   final VoidCallback? onTabCloseButton;
   final VoidCallback? onTap;
   final Widget page;
+  // Runs synchronously before another tab can acquire native input.
+  final VoidCallback? onDeactivate;
+  final SessionID? Function()? sessionId;
 
   TabInfo(
       {required this.key,
@@ -44,6 +47,8 @@ class TabInfo {
       this.closable = true,
       this.onTabCloseButton,
       this.onTap,
+      this.onDeactivate,
+      this.sessionId,
       required this.page});
 }
 
@@ -95,6 +100,8 @@ CancelFunc showRightMenu(ToastBuilder builder,
 class DesktopTabController {
   final state = DesktopTabState().obs;
   final DesktopTabType tabType;
+  int _selectionGeneration = 0;
+  int get selectionGeneration => _selectionGeneration;
 
   /// index, key
   Function(int, String)? onRemoved;
@@ -105,6 +112,11 @@ class DesktopTabController {
       {required this.tabType, this.onRemoved, this.onSelected});
 
   int get length => state.value.tabs.length;
+
+  TabInfo? get selectedTab =>
+      state.value.tabs.elementAtOrNull(state.value.selected);
+
+  void deactivateSelected() => selectedTab?.onDeactivate?.call();
 
   void add(TabInfo tab) {
     if (!isDesktop) return;
@@ -133,16 +145,21 @@ class DesktopTabController {
     if (!isDesktop) return;
     final len = state.value.tabs.length;
     if (index < 0 || index > len - 1) return;
+    if (tabType == DesktopTabType.main && !state.value.tabs[index].closable)
+      return;
     final key = state.value.tabs[index].key;
     final currentSelected = state.value.selected;
-    int toIndex = 0;
-    if (index == len - 1) {
-      toIndex = max(0, currentSelected - 1);
-    } else if (index < len - 1 && index < currentSelected) {
-      toIndex = max(0, currentSelected - 1);
+    if (index == currentSelected) {
+      ++_selectionGeneration;
+      deactivateSelected();
     }
+    final toIndex = index < currentSelected
+        ? currentSelected - 1
+        : min(currentSelected, max(0, len - 2));
     state.value.tabs.removeAt(index);
     state.value.scrollController.itemCount = state.value.tabs.length;
+    state.value.selected = toIndex;
+    state.refresh();
     jumpTo(toIndex);
     onRemoved?.call(index, key);
   }
@@ -150,13 +167,21 @@ class DesktopTabController {
   /// For addTab, tabPage has not been initialized, set [callOnSelected] to false,
   /// and call [onSelected] at the end of initState
   bool jumpTo(int index, {bool callOnSelected = true}) {
-    if (!isDesktop || index < 0) {
+    if (!isDesktop || index < 0 || index >= length) {
       return false;
     }
+    if (state.value.selected != index) {
+      ++_selectionGeneration;
+      deactivateSelected();
+    }
+    final targetKey = state.value.tabs[index].key;
     state.update((val) {
       if (val != null) {
         val.selected = index;
         Future.delayed(Duration(milliseconds: 100), (() {
+          if (val.selected != index ||
+              index >= val.tabs.length ||
+              val.tabs[index].key != targetKey) return;
           if (val.pageController.hasClients) {
             val.pageController.jumpToPage(index);
           }
@@ -169,8 +194,8 @@ class DesktopTabController {
         }));
       }
     });
-    if ((isDesktop && (bind.isIncomingOnly() || bind.isOutgoingOnly())) ||
-        callOnSelected) {
+    if (callOnSelected ||
+        (isDesktop && (bind.isIncomingOnly() || bind.isOutgoingOnly()))) {
       if (state.value.tabs.length > index) {
         final key = state.value.tabs[index].key;
         onSelected?.call(key);
@@ -212,6 +237,8 @@ class DesktopTabController {
   }
 
   void clear() {
+    ++_selectionGeneration;
+    deactivateSelected();
     state.value.tabs.clear();
     state.refresh();
   }
@@ -246,6 +273,7 @@ class DesktopTab extends StatefulWidget {
   final TabMenuBuilder? tabMenuBuilder;
   final Widget? tail;
   final Future<bool> Function()? onWindowCloseButton;
+  final Future<void> Function()? onWindowHidden;
   final TabBuilder? tabBuilder;
   final LabelGetter? labelGetter;
   final double? maxLabelWidth;
@@ -271,6 +299,7 @@ class DesktopTab extends StatefulWidget {
     this.tabMenuBuilder,
     this.tail,
     this.onWindowCloseButton,
+    this.onWindowHidden,
     this.tabBuilder,
     this.labelGetter,
     this.maxLabelWidth,
@@ -307,6 +336,7 @@ class _DesktopTabState extends State<DesktopTab>
   Widget? get tail => widget.tail;
   Future<bool> Function()? get onWindowCloseButton =>
       widget.onWindowCloseButton;
+  Future<void> Function()? get onWindowHidden => widget.onWindowHidden;
   TabBuilder? get tabBuilder => widget.tabBuilder;
   LabelGetter? get labelGetter => widget.labelGetter;
   double? get maxLabelWidth => widget.maxLabelWidth;
@@ -377,15 +407,20 @@ class _DesktopTabState extends State<DesktopTab>
   @override
   void onWindowFocus() {
     stateGlobal.isFocused.value = true;
+    if (tabType == DesktopTabType.main) {
+      unawaited(rustDeskWinManager.registerActiveWindow(kMainWindowId));
+    }
   }
 
   @override
   void onWindowBlur() {
+    controller.deactivateSelected();
     stateGlobal.isFocused.value = false;
   }
 
   @override
   void onWindowMinimize() {
+    controller.deactivateSelected();
     stateGlobal.setMinimized(true);
     stateGlobal.setMaximized(false);
     super.onWindowMinimize();
@@ -437,8 +472,19 @@ class _DesktopTabState extends State<DesktopTab>
     super.onWindowResized();
   }
 
+  bool _handlingWindowClose = false;
   @override
   void onWindowClose() async {
+    if (_handlingWindowClose) return;
+    _handlingWindowClose = true;
+    try {
+      await _handleWindowClose();
+    } finally {
+      _handlingWindowClose = false;
+    }
+  }
+
+  Future<void> _handleWindowClose() async {
     mainWindowClose() async => await windowManager.hide();
     notMainWindowClose(WindowController windowController) async {
       if (controller.length != 0) {
@@ -460,19 +506,31 @@ class _DesktopTabState extends State<DesktopTab>
       Future<bool> Function() checkFullscreen,
       Future<void> Function() closeFunc,
     ) async {
+      final completed = Completer<void>();
+      var finishing = false;
       _macOSCheckRestoreCounter = 0;
       _macOSCheckRestoreTimer =
           Timer.periodic(Duration(milliseconds: 30), (timer) async {
+        if (finishing) return;
         _macOSCheckRestoreCounter++;
-        if (!await checkFullscreen() || _macOSCheckRestoreCounter >= 30) {
+        final fullscreen = await checkFullscreen();
+        if (finishing) return;
+        if (!fullscreen || _macOSCheckRestoreCounter >= 30) {
+          finishing = true;
           _macOSCheckRestoreTimer?.cancel();
           _macOSCheckRestoreTimer = null;
           Timer(Duration(milliseconds: 700), () async {
-            await closeFunc();
-            unawaited(maybeQuitWhenNoWindows());
+            try {
+              await closeFunc();
+              completed.complete();
+              unawaited(maybeQuitWhenNoWindows());
+            } catch (error, stack) {
+              completed.completeError(error, stack);
+            }
           });
         }
       });
+      await completed.future;
     }
 
     if (await _isLinuxWindowClosed()) return;
@@ -481,23 +539,27 @@ class _DesktopTabState extends State<DesktopTab>
 
     // hide window on close
     if (isMainWindow) {
+      controller.deactivateSelected();
+      // Confirm while visible. The window is hidden next; sessions close after.
+      if (!(await onWindowCloseButton?.call() ?? true)) return;
       if (rustDeskWinManager.getActiveWindows().contains(kMainWindowId)) {
         await rustDeskWinManager.unregisterActiveWindow(kMainWindowId);
       }
-      if (await _isLinuxWindowClosed()) return;
-      // macOS specific workaround, the window is not hiding when in fullscreen.
-      if (isMacOS && await windowManager.isFullScreen()) {
-        await windowManager.setFullScreen(false);
-        await macOSWindowClose(
-          () async => await windowManager.isFullScreen(),
-          mainWindowClose,
-        );
-      } else {
-        await mainWindowClose();
+      if (!await _isLinuxWindowClosed()) {
+        // macOS specific workaround, the window is not hiding when in fullscreen.
+        if (isMacOS && await windowManager.isFullScreen()) {
+          await windowManager.setFullScreen(false);
+          await macOSWindowClose(
+            () async => await windowManager.isFullScreen(),
+            mainWindowClose,
+          );
+        } else {
+          await mainWindowClose();
+        }
       }
-      // Keep running when remote / file-transfer / terminal windows are open.
-      // Otherwise quit via maybeQuitWhenNoWindows().
-      if (isMacOS && !rustDeskWinManager.hasOpenSessionWindows()) {
+      // Tear down sessions only after the window is gone, on every desktop.
+      await onWindowHidden?.call();
+      if (!rustDeskWinManager.hasOpenSessionWindows()) {
         unawaited(maybeQuitWhenNoWindows());
       }
     } else {
@@ -629,7 +691,9 @@ class _DesktopTabState extends State<DesktopTab>
                               .then((value) => stateGlobal.setMaximized(value));
                         }
                       }
-                    : (isIncomingHomePage ? () {} : null), // Keep tap recognizer for Windows touch.
+                    : (isIncomingHomePage
+                        ? () {}
+                        : null), // Keep tap recognizer for Windows touch.
                 onPanStart: (_) => startDragging(isMainWindow),
                 onPanCancel: () {
                   // We want to disable dragging of the tab area in the tab bar.
@@ -819,17 +883,17 @@ class WindowActionPanelState extends State<WindowActionPanel> {
                   message: 'Close',
                   icon: IconFont.close,
                   onTap: () async {
+                    // Main window confirmation and session teardown run in
+                    // onWindowClose, after this close request, so the window
+                    // can hide before connections are dropped.
+                    if (widget.isMainWindow) {
+                      await windowManager.close();
+                      return;
+                    }
                     final res = await widget.onClose?.call() ?? true;
                     if (res) {
-                      // hide for all window
-                      // note: the main window can be restored by tray icon
                       Future.delayed(Duration.zero, () async {
-                        if (widget.isMainWindow) {
-                          await windowManager.close();
-                        } else {
-                          await WindowController.fromWindowId(kWindowId!)
-                              .close();
-                        }
+                        await WindowController.fromWindowId(kWindowId!).close();
                       });
                     }
                   },
@@ -888,13 +952,60 @@ Future<bool> toggleMaximize(bool isMainWindow) async {
   }
 }
 
-Future<bool> closeConfirmDialog() async {
+/// Count session tabs, independent of whether their FFI has finished starting.
+/// Returns the sessions to close, or null when the user cancelled.
+/// Confirmation and auditing must both finish before any connection is closed.
+Future<List<TabInfo>?> prepareCloseMainSessionTabs({
+  required Iterable<TabInfo> tabs,
+  required Future<bool> Function() confirm,
+  Future<bool> Function(TabInfo)? auditCancelled,
+}) async {
+  final sessions = tabs.where((tab) => tab.sessionId != null).toList();
+  if (sessions.isEmpty) return const [];
+  if (sessions.length > 1 && !await confirm()) return null;
+  for (final tab in sessions) {
+    if (await auditCancelled?.call(tab) ?? false) return null;
+  }
+  return sessions;
+}
+
+/// Hide the window before tearing down sessions so the UI disappears first.
+Future<bool> hideThenCloseMainSessions({
+  required Future<List<TabInfo>?> Function() prepare,
+  required Future<void> Function() hide,
+  required Future<void> Function(List<TabInfo> sessions) close,
+}) async {
+  final sessions = await prepare();
+  if (sessions == null) return false;
+  await hide();
+  if (sessions.isNotEmpty) await close(sessions);
+  return true;
+}
+
+Future<bool> closeMainSessionTabs({
+  required Iterable<TabInfo> tabs,
+  required Future<bool> Function() confirm,
+  Future<bool> Function(TabInfo)? auditCancelled,
+  required Future<void> Function(List<TabInfo>) close,
+}) async {
+  final sessions = await prepareCloseMainSessionTabs(
+    tabs: tabs,
+    confirm: confirm,
+    auditCancelled: auditCancelled,
+  );
+  if (sessions == null) return false;
+  if (sessions.isNotEmpty) await close(sessions);
+  return true;
+}
+
+Future<bool> closeConfirmDialog({bool allowPreference = true}) async {
   var confirm = true;
   final res = await gFFI.dialogManager.show<bool>((setState, close, context) {
     submit() {
       String value = bool2option(kOptionEnableConfirmClosingTabs, confirm);
-      bind.mainSetLocalOption(
-          key: kOptionEnableConfirmClosingTabs, value: value);
+      if (allowPreference)
+        bind.mainSetLocalOption(
+            key: kOptionEnableConfirmClosingTabs, value: value);
       close(true);
     }
 
@@ -910,19 +1021,20 @@ Future<bool> closeConfirmDialog() async {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(translate("Disconnect all devices?")),
-            CheckboxListTile(
-              contentPadding: const EdgeInsets.all(0),
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: Text(
-                translate("Confirm before closing multiple tabs"),
-              ),
-              value: confirm,
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => confirm = v);
-              },
-            )
+            if (allowPreference)
+              CheckboxListTile(
+                contentPadding: const EdgeInsets.all(0),
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(
+                  translate("Confirm before closing multiple tabs"),
+                ),
+                value: confirm,
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => confirm = v);
+                },
+              )
           ]),
       // confirm checkbox
       actions: [

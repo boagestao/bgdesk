@@ -195,8 +195,11 @@ class WindowsX86Tests(unittest.TestCase):
         composite = (repo / '.github/actions/build-edition/action.yml').read_text()
         self.assertIn('release-artifacts/$PLATFORM-$ARCH-$EDITION', composite)
         pair = (repo / '.github/actions/build-windows-x86-pair/action.yml').read_text()
-        self.assertLess(pair.index('edition: cliente'), pair.index('edition: suporte'))
-        for edition in ('cliente', 'suporte'):
+        self.assertIn('edition: cliente', pair)
+        self.assertNotIn('edition: suporte', pair)
+        with self.assertRaises(ValueError):
+            collect.specs('windows', 'x86', 'suporte')
+        for edition in ('cliente',):
             paths = collect.specs('windows', 'x86', edition)
             self.assertEqual([fmt for fmt, _ in paths], ['exe', 'inno-exe'])
             for _, path in paths:
@@ -206,7 +209,7 @@ class WindowsX86Tests(unittest.TestCase):
     def test_installer_receives_the_selected_architecture_and_retains_the_x64_default(self):
         repo = Path(__file__).resolve().parents[2]
         for name in ('installers/build-installer.sh', 'installers/cliente.iss', 'installers/suporte.iss',
-                     'scripts/build-out-dir.sh'):
+                     'scripts/build-out-dir.sh', 'Cargo.toml', 'res/update/application_version.py'):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(repo / name, dest)
@@ -222,7 +225,7 @@ edition="$(basename "$1" .iss)"
 arch="${2#/DBuildArch=}"
 case "$arch" in x86) suffix=win32;; x86_64) suffix=win64;; *) exit 99;; esac
 touch "build/windows-$arch-$edition/bgdesk-$edition-$suffix.exe"
-printf '%s\\n' "$2" > compiler-arguments
+printf '%s\\n' "$2" "$3" "$4" > compiler-arguments
 ''')
         iscc.chmod(0o755)
         for arch in ('x86', 'x86_64'):
@@ -234,7 +237,8 @@ printf '%s\\n' "$2" > compiler-arguments
                 subprocess.run(['bash', str(self.root / 'installers/build-installer.sh'), *arguments],
                                cwd=self.root, env=dict(os.environ, INNO_SETUP_DIR=str(compiler)),
                                check=True, capture_output=True)
-                self.assertEqual((self.root / 'compiler-arguments').read_text().strip(), '/DBuildArch='+arch)
+                self.assertEqual((self.root / 'compiler-arguments').read_text().splitlines(),
+                                 ['/DBuildArch='+arch, '/DAppVersion=1.5.1-1', '/DNumericVersion=1.5.1.1'])
 
 
 if __name__ == '__main__':

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Publish complete signed releases to R2; announce them only after verification."""
 import argparse
+from distribution import editions_for_target
 import hashlib
 import json
 import mimetypes
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "res/update"))
+from application_version import parse_version
 import re
 import subprocess
-import sys
 import tempfile
 import urllib.request
 
@@ -91,7 +95,7 @@ def read_records(artifacts, version, *, include_android=True):
             ("linux", "x86_64", ("deb", "rpm", "AppImage", "pkg.tar.zst")),
             ("linux", "aarch64", ("deb", "rpm", "AppImage")),
             ("android", "universal", ("apk",)),
-        ) for fmt in formats
+        ) for fmt in formats if edition in editions_for_target(platform, arch)
     }
     android = {(e, 'android', 'universal', 'apk') for e in ('cliente', 'suporte')}
     # Historical desktop-only runs remain valid for publication recovery.
@@ -174,8 +178,7 @@ def main():
     parser.add_argument("--source-commit", help="exact commit whose successful builds produced the artifacts")
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
-        raise SystemExit("Invalid stable release version")
+    parse_version(args.version)
     origin = os.environ["R2_PUBLIC_ORIGIN"]
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+", origin):
         raise SystemExit("R2_PUBLIC_ORIGIN must be an HTTPS origin without a path or trailing slash")

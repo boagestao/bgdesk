@@ -1,3 +1,4 @@
+import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -370,8 +371,10 @@ class InputModel {
               !model.isViewCamera) {
             _sideButtonDownModels[mb] = model;
             // Fire-and-forget to avoid blocking the platform channel handler.
-            unawaited(model._sendMouseUnchecked(type, mb).catchError((Object e) {
-              debugPrint('[InputModel] failed to send side button $type for $mb: $e');
+            unawaited(
+                model._sendMouseUnchecked(type, mb).catchError((Object e) {
+              debugPrint(
+                  '[InputModel] failed to send side button $type for $mb: $e');
             }));
           }
         } else {
@@ -381,8 +384,10 @@ class InputModel {
           // release always goes through even if permissions changed.
           final model = _sideButtonDownModels.remove(mb);
           if (model != null) {
-            unawaited(model._sendMouseUnchecked(type, mb).catchError((Object e) {
-              debugPrint('[InputModel] failed to send side button $type for $mb: $e');
+            unawaited(
+                model._sendMouseUnchecked(type, mb).catchError((Object e) {
+              debugPrint(
+                  '[InputModel] failed to send side button $type for $mb: $e');
             }));
           }
         }
@@ -491,7 +496,8 @@ class InputModel {
   // It should not block physical keyboard events.
   bool keyboardInputAllowed = true;
 
-  bool get keyboardPerm => parent.target!.ffiModel.keyboard;
+  bool get keyboardPerm =>
+      isSessionSelected?.call() != false && parent.target!.ffiModel.keyboard;
   String get id => parent.target?.id ?? '';
   String? get peerPlatform => parent.target?.ffiModel.pi.platform;
   String get peerVersion => parent.target?.ffiModel.pi.version ?? '';
@@ -519,6 +525,7 @@ class InputModel {
       modify: (msg) => modify(msg),
       getPointerInsideImage: () => _pointerInsideImage,
       setPointerInsideImage: (inside) => _pointerInsideImage = inside,
+      canCaptureInput: () => isSessionSelected?.call() != false,
     );
     _relativeMouse.onDisabled = () => onRelativeMouseModeDisabled?.call();
 
@@ -749,6 +756,8 @@ class InputModel {
   }
 
   KeyEventResult handleRawKeyEvent(RawKeyEvent e) {
+    if (!_releasingInput && isSessionSelected?.call() == false)
+      return KeyEventResult.ignored;
     if (_localFlutterShortcuts.tryDispatchRaw(e)) return KeyEventResult.handled;
     if (isViewOnly) {
       if (isWeb && !isInputSourceFlutter) return KeyEventResult.ignored;
@@ -845,6 +854,8 @@ class InputModel {
   }
 
   KeyEventResult handleKeyEvent(KeyEvent e) {
+    if (!_releasingInput && isSessionSelected?.call() == false)
+      return KeyEventResult.ignored;
     if (_localFlutterShortcuts.tryDispatch(e)) return KeyEventResult.handled;
     if (isViewOnly) {
       if (isWeb && !isInputSourceFlutter) return KeyEventResult.ignored;
@@ -944,8 +955,8 @@ class InputModel {
         isDesktop || (isWebDesktop && keyboardMode == kKeyMapMode);
     if (isMobileAndMapMode || isDesktopAndMapMode) {
       _restoreFlutterShortcutModifiers(e);
-      // Native map input is matched and tracked by Rust before forwarding.
-      if (isWeb) {
+      // Keep per-session releases as well as Rust's native shortcut tracking.
+      if (isWeb || isDesktop) {
         _trackFlutterShortcutKey(e.physicalKey, e.logicalKey,
             down: e is KeyDownEvent || e is KeyRepeatEvent,
             up: e is KeyUpEvent,
@@ -959,7 +970,8 @@ class InputModel {
           e is KeyDownEvent || e is KeyRepeatEvent,
           iosCapsLock);
     } else {
-      if (!isWeb && _tryDispatchFlutterShortcut(e)) return KeyEventResult.handled;
+      if (!isWeb && _tryDispatchFlutterShortcut(e))
+        return KeyEventResult.handled;
       _restoreFlutterShortcutModifiers(e, mapMode: false);
       _trackFlutterShortcutKey(e.physicalKey, e.logicalKey,
           down: e is KeyDownEvent, up: e is KeyUpEvent);
@@ -1081,7 +1093,8 @@ class InputModel {
           downOrUp: false,
         ));
       } else {
-        final label = physicalKeyMap[entry.value.usbHidUsage] ?? entry.key.keyLabel;
+        final label =
+            physicalKeyMap[entry.value.usbHidUsage] ?? entry.key.keyLabel;
         releases.add(bind.sessionInputKey(
           sessionId: sessionId,
           name: label,
@@ -1173,7 +1186,8 @@ class InputModel {
     final pressed = raw
         ? RawKeyboard.instance.physicalKeysPressed
         : HardwareKeyboard.instance.physicalKeysPressed;
-    if (!_localFlutterShortcuts.resumeModifiersAfterViewOnly(incoming, pressed)) {
+    if (!_localFlutterShortcuts.resumeModifiersAfterViewOnly(
+        incoming, pressed)) {
       return;
     }
     ctrl = pressed.contains(PhysicalKeyboardKey.controlLeft) ||
@@ -1195,7 +1209,8 @@ class InputModel {
     }
   }
 
-  void _restoreRawFlutterShortcutModifiers(RawKeyEvent e, {bool mapMode = true}) {
+  void _restoreRawFlutterShortcutModifiers(RawKeyEvent e,
+      {bool mapMode = true}) {
     final keys = _localFlutterShortcuts.takeRawModifiersToRestore(
         e, RawKeyboard.instance.physicalKeysPressed);
     if (!mapMode) return;
@@ -1281,8 +1296,20 @@ class InputModel {
     } else {
       down = false;
     }
-    inputRawKey(
-        e.character ?? '', platformCode, positionCode, down, iosCapsLock);
+    final name = e.character ?? '';
+    final lockModes = _buildLockModes(iosCapsLock);
+    if (keyboardPerm) {
+      _localFlutterShortcuts.recordForwardedKey(e.physicalKey,
+          down: down,
+          release: () => bind.sessionHandleFlutterRawKeyEvent(
+              sessionId: sessionId,
+              name: name,
+              platformCode: platformCode,
+              positionCode: positionCode,
+              lockModes: lockModes,
+              downOrUp: false));
+    }
+    inputRawKey(name, platformCode, positionCode, down, iosCapsLock);
   }
 
   /// Send raw Key Event
@@ -1455,6 +1482,8 @@ class InputModel {
   }
 
   void enterOrLeave(bool enter) {
+    if (isViewCamera) return;
+    if (enter && isSessionSelected?.call() == false) return;
     toReleaseKeys.release(handleKeyEvent);
     toReleaseRawKeys.release(handleRawKeyEvent);
     _pointerMovedAfterEnter = false;
@@ -1479,6 +1508,45 @@ class InputModel {
     }
     if (!isWeb && enter) {
       bind.setCurSessionId(sessionId: sessionId);
+    }
+  }
+
+  bool Function()? isSessionSelected;
+  int Function()? sessionSelectionGeneration;
+  bool _releasingInput = false;
+  int _inputActivationGeneration = 0;
+  int get inputActivationGeneration =>
+      sessionSelectionGeneration?.call() ?? _inputActivationGeneration;
+
+  // Called before tab selection changes, while release events still belong to
+  // this session. Leaving the canvas alone does not disable native pointer lock.
+  void deactivateSessionInput() {
+    ++_inputActivationGeneration;
+    _releasingInput = true;
+    try {
+      unawaited(_localFlutterShortcuts.releaseForwardedKeys().catchError(
+          (Object e) => debugPrint('Failed to release session keys: $e')));
+      final pressed = _pressedMouseButtons | _lastButtons;
+      _pressedMouseButtons = _lastButtons = 0;
+      for (final entry in {
+        kPrimaryMouseButton: MouseButtons.left,
+        kSecondaryMouseButton: MouseButtons.right,
+        kMiddleMouseButton: MouseButtons.wheel,
+      }.entries) {
+        if (pressed & entry.key != 0) {
+          unawaited(_sendMouseUnchecked('up', entry.value));
+        }
+      }
+      disposeSideButtonTracking();
+      exitRelativeMouseModeWithKeyRelease();
+      // Cancel an enable request whose platform response has not arrived yet.
+      _relativeMouse.setRelativeMouseMode(false);
+      enterOrLeave(false);
+      if (!isWeb && isDesktop) {
+        bind.sessionDeactivateInput(sessionId: sessionId);
+      }
+    } finally {
+      _releasingInput = false;
     }
   }
 
@@ -1952,9 +2020,10 @@ class InputModel {
       List<RemoteWindowCoords> remoteWindowCoords) async {
     final coords =
         await rustDeskWinManager.getOtherRemoteWindowCoordsFromMain();
-    final wc = WindowController.fromWindowId(kWindowId!);
     try {
-      final frame = await wc.getFrame();
+      final frame = usesUnifiedSessionTabs
+          ? await windowManager.getBounds(ignoreDevicePixelRatio: isWindows)
+          : await WindowController.fromWindowId(kWindowId!).getFrame();
       for (final c in coords) {
         c.relativeOffset = Offset(
             c.windowRect.left - frame.left, c.windowRect.top - frame.top);
@@ -1979,7 +2048,8 @@ class InputModel {
     if (e is PointerScrollEvent) {
       final rawDx = e.scrollDelta.dx;
       final rawDy = e.scrollDelta.dy;
-      final dominantDelta = rawDx.abs() > rawDy.abs() ? rawDx.abs() : rawDy.abs();
+      final dominantDelta =
+          rawDx.abs() > rawDy.abs() ? rawDx.abs() : rawDy.abs();
       final isSmooth = dominantDelta < 1;
       final nowUs = DateTime.now().microsecondsSinceEpoch;
       final dtUs = _lastWheelTsUs == 0 ? 0 : nowUs - _lastWheelTsUs;
@@ -2139,6 +2209,7 @@ class InputModel {
     bool moveCanvas = true,
     bool edgeScroll = false,
   }) {
+    if (isSessionSelected?.call() == false) return null;
     if (isViewCamera) return null;
     final buttons = evt['buttons'];
     final isMatchingMouseUp = (isDesktop || isWebDesktop) &&

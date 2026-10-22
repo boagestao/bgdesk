@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import json
+from distribution import editions_for_target
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "res/update"))
+from application_version import parse_version
 import re
 import subprocess
-import sys
 import tomllib
 
 import config_archive
@@ -61,8 +65,7 @@ def main():
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+", origin):
         raise SystemExit("Update origin must be HTTPS, with no path or trailing slash")
     version = tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"]
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
-        raise SystemExit("Cargo.toml must contain a stable MAJOR.MINOR.PATCH release version")
+    parse_version(version)
     flutter_version = re.search(r"^version:\s*(\S+)", Path("flutter/pubspec.yaml").read_text(), re.M)
     if not flutter_version or flutter_version[1].split("+")[0] != version:
         raise SystemExit("Cargo.toml and flutter/pubspec.yaml must have the same version")
@@ -105,7 +108,7 @@ def main():
         for key, value in outputs.items():
             handle.write(f"{key}={value}\n")
     runners = len(matrix(platforms)['include'])
-    print(f"BGDesk {version}: {runners} runners, {len(list(artifact_targets(platforms))) * 2} builds (cliente then suporte); publication={publish}")
+    print(f"BGDesk {version}: {runners} runners, {sum(len(editions_for_target(p, a)) for p, a in artifact_targets(platforms))} builds (cliente then suporte); publication={publish}")
 
 
 if __name__ == "__main__":

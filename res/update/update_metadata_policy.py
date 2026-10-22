@@ -21,17 +21,14 @@ def validate_release(release_id, version):
         )
     ):
         raise ValueError(f"invalid release id: {release_id}")
-    match = re.fullmatch(r"v?([0-9]+)\.([0-9]+)\.([0-9]+)", release_id)
-    if not match:
-        return
-    segments = [int(part) for part in match.groups()]
-    if any(part > 65535 for part in segments) or not any(segments):
-        raise ValueError(f"invalid release version: {release_id}")
-    display_version = ".".join(match.groups())
-    if display_version != version:
-        raise ValueError(
-            f"release id {release_id} maps to {display_version}, not {version}"
-        )
+    from application_version import parse_version
+    # Arbitrary signed offline IDs remain supported; public numeric IDs must
+    # match the complete revision, not just the upstream base.
+    display_version = release_id.removeprefix('v')
+    if re.match(r"[0-9]+\.", display_version):
+        parse_version(display_version)
+        if display_version != version:
+            raise ValueError(f"release id {release_id} maps to {display_version}, not {version}")
 
 
 def validate_published_at(value):

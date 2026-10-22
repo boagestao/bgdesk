@@ -29,6 +29,7 @@ typedef ShortcutCallback = FutureOr<void> Function();
 /// via [onTriggered], which runs whatever callback the toolbar / menu
 /// builders previously registered for that action id.
 class ShortcutModel {
+  bool Function()? isSessionSelected;
   static WeakReference<ShortcutModel>? _activeWebModel;
 
   final WeakReference<FFI> parent;
@@ -81,14 +82,16 @@ class ShortcutModel {
   /// support), and the chord is a deliberate no-op: a bound chord always
   /// belongs to RustDesk and is never forwarded to the remote.
   void onTriggered(String actionId) {
-    if (parent.target?.closed != false) return;
+    if (parent.target?.closed != false || isSessionSelected?.call() == false)
+      return;
     unawaited(Future.sync(() async {
       final refresh = _refreshers[actionId];
       if (refresh != null) {
         await refresh();
         if (!identical(_refreshers[actionId], refresh)) return;
       }
-      if (parent.target?.closed != false) return;
+      if (parent.target?.closed != false || isSessionSelected?.call() == false)
+        return;
       final cb = _callbacks[actionId];
       if (cb != null) {
         await cb();
@@ -353,7 +356,7 @@ void registerSessionShortcutActions(
   // view via these shortcuts.
   void switchDisplayBy(int delta) {
     final pi = ffi.ffiModel.pi;
-    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    final privacyMode = PrivacyModeState.find(ffi.sharedStateId).value;
     if (privacyMode.isNotEmpty &&
         !allowDisplaySwitchInPrivacyMode(pi, privacyMode)) {
       return;
@@ -392,7 +395,7 @@ void registerSessionShortcutActions(
   // view never engages.
   ffi.shortcutModel.register(kShortcutActionSwitchDisplayAll, () {
     final pi = ffi.ffiModel.pi;
-    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    final privacyMode = PrivacyModeState.find(ffi.sharedStateId).value;
     if (privacyMode.isNotEmpty &&
         !allowDisplaySwitchInPrivacyMode(pi, privacyMode)) {
       return;
@@ -412,7 +415,7 @@ void registerSessionShortcutActions(
     void switchTabBy(int delta) {
       final tabs = tabController.state.value.tabs;
       if (tabs.length <= 1) return;
-      final cur = tabs.indexWhere((t) => t.key == ffi.id);
+      final cur = tabs.indexWhere((t) => t.key == (ffi.tabKey ?? ffi.id));
       if (cur < 0) return;
       final next = (cur + delta + tabs.length) % tabs.length;
       tabController.jumpTo(next);
@@ -428,12 +431,12 @@ void registerSessionShortcutActions(
     // through the same path as a menu close.
     ffi.shortcutModel.register(kShortcutActionCloseTab, () async {
       if (await desktopTryShowTabAuditDialogCloseCancelled(
-        id: ffi.id,
+        id: ffi.tabKey ?? ffi.id,
         tabController: tabController,
       )) {
         return;
       }
-      tabController.closeBy(ffi.id);
+      closeConnection(sessionId: ffi.sessionId);
     });
   }
 
@@ -544,7 +547,7 @@ void registerSessionShortcutActions(
   ffi.shortcutModel.register(kShortcutActionPlugOutAllVirtualDisplays, () {
     if (ffi.connType != ConnType.defaultConn ||
         !showVirtualDisplayMenu(ffi) ||
-        PrivacyModeState.find(ffi.id).value.isNotEmpty ||
+        PrivacyModeState.find(ffi.sharedStateId).value.isNotEmpty ||
         (ffi.ffiModel.pi.isAmyuniIdd &&
             ffi.ffiModel.pi.amyuniVirtualDisplayCount == 0)) {
       return;
@@ -578,7 +581,7 @@ void registerSessionShortcutActions(
   bool checkPrivacyModeAllowed(String implKey) {
     final ffiModel = ffi.ffiModel;
     final pi = ffiModel.pi;
-    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    final privacyMode = PrivacyModeState.find(ffi.sharedStateId).value;
     if (ffi.connType != ConnType.defaultConn ||
         ffiModel.viewOnly ||
         (privacyMode.isEmpty &&
@@ -617,7 +620,7 @@ void registerSessionShortcutActions(
     bind.sessionTogglePrivacyMode(
       sessionId: sessionId,
       implKey: implKey,
-      on: PrivacyModeState.find(ffi.id).value != implKey,
+      on: PrivacyModeState.find(ffi.sharedStateId).value != implKey,
     );
   });
   ffi.shortcutModel.register(kShortcutActionPrivacyMode2, () {
@@ -627,7 +630,7 @@ void registerSessionShortcutActions(
     bind.sessionTogglePrivacyMode(
       sessionId: sessionId,
       implKey: implKey,
-      on: PrivacyModeState.find(ffi.id).value != implKey,
+      on: PrivacyModeState.find(ffi.sharedStateId).value != implKey,
     );
   });
 

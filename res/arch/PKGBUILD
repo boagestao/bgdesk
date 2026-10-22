@@ -1,6 +1,7 @@
 # Packages the already compiled Flutter bundle; no compiler is invoked here.
 pkgname="bgdesk-${BGDESK_EDITION:?Set BGDESK_EDITION to cliente or suporte}"
 pkgver="${BGDESK_VERSION:?Set BGDESK_VERSION}"
+pkgver="${pkgver/-/.}"
 pkgrel=1
 pkgdesc="BGDesk remote desktop (${BGDESK_EDITION}) with unattended Wayland and X11 access"
 arch=('x86_64')

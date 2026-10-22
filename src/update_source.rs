@@ -19,18 +19,34 @@ pub(crate) fn release_url(release_id: &str) -> String {
 
 pub(crate) fn display_version_from_release_id(release_id: &str) -> ResultType<String> {
     let version = release_id.strip_prefix('v').unwrap_or(release_id);
-    let parts = version.split('.').collect::<Vec<_>>();
-    if parts.len() != 3
-        || parts.iter().any(|part| {
-            part.is_empty()
-                || !part.bytes().all(|byte| byte.is_ascii_digit())
-                || part.parse::<u16>().is_err()
-        })
-        || parts.iter().all(|part| part.parse::<u16>() == Ok(0))
-    {
-        bail!("Release id is not a stable display version: {release_id}");
-    }
+    parse_update_version(version)?;
     Ok(version.to_owned())
+}
+
+// BGDesk revisions are stable local revisions, not SemVer prereleases.
+// Do not use this ordering for peer/protocol capability negotiation.
+pub(crate) fn parse_update_version(version: &str) -> ResultType<[u16; 4]> {
+    let (base, revision) = version.split_once('-').unwrap_or((version, "0"));
+    let mut result = [0; 4];
+    let parts: Vec<_> = base.split('.').collect();
+    if parts.len() != 3 {
+        bail!("Invalid BGDesk version: {version}");
+    }
+    for (index, value) in parts.into_iter().chain(std::iter::once(revision)).enumerate() {
+        if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit())
+            || (value.len() > 1 && value.starts_with('0')) {
+            bail!("Invalid BGDesk version: {version}");
+        }
+        result[index] = value.parse()?;
+    }
+    if result[..3] == [0, 0, 0] || (version.contains('-') && result[3] == 0) {
+        bail!("Invalid BGDesk version: {version}");
+    }
+    Ok(result)
+}
+
+pub(crate) fn is_newer_update(candidate: &str, installed: &str) -> ResultType<bool> {
+    Ok(parse_update_version(candidate)? > parse_update_version(installed)?)
 }
 
 pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String> {
@@ -65,6 +81,20 @@ pub(crate) fn download_file_name(download_url: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn revisions_are_ordered_numerically_without_overlapping_the_next_base() {
+        let versions = ["1.5.1", "1.5.1-1", "1.5.1-2", "1.5.1-10", "1.5.1-65535", "1.5.2"];
+        for (i, installed) in versions.iter().enumerate() {
+            for (j, candidate) in versions.iter().enumerate() {
+                assert_eq!(is_newer_update(candidate, installed).unwrap(), j > i);
+            }
+        }
+        assert_eq!(display_version_from_release_id("v1.5.1-10").unwrap(), "1.5.1-10");
+        for version in ["1.5.1-b", "1.5.1-0", "1.5.1-01", "1.5.1-65536", "1.5.1.1", "1.5.1-1+69", "01.5.1"] {
+            assert!(parse_update_version(version).is_err(), "{version}");
+        }
+    }
 
     #[test]
     fn accepts_own_edition_and_stable_releases() {

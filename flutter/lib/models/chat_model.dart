@@ -418,7 +418,8 @@ class ChatModel with ChangeNotifier {
             }
           } else {
             if (notSelected) {
-              UnreadChatCountState.find(peerId).value += 1;
+              UnreadChatCountState.find(parent.target?.sharedStateId ?? peerId)
+                  .value += 1;
             }
           }
         }

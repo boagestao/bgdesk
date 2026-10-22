@@ -124,7 +124,7 @@ def sciter_dll(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--edition', choices=('cliente', 'suporte'), required=True)
+    parser.add_argument('--edition', choices=('cliente',), required=True)
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Win32 compilation requires a Windows MSVC runner')

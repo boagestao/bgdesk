@@ -36,6 +36,10 @@ class TerminalPage extends StatefulWidget {
   final String tabKey;
   final SimpleWrapper<State<TerminalPage>?> _lastState = SimpleWrapper(null);
 
+  FFI? get initializedFfi => (_lastState.value as _TerminalPageState?)?._ffi;
+  void deactivateInput() =>
+      (_lastState.value as _TerminalPageState?)?._terminalFocusNode.unfocus();
+
   FFI get ffi => (_lastState.value! as _TerminalPageState)._ffi;
 
   @override
@@ -62,7 +66,8 @@ class _TerminalPageState extends State<TerminalPage>
     super.initState();
 
     // Listen for tab selection changes to request focus
-    _tabStateSubscription = widget.tabController.state.listen(_onTabStateChanged);
+    _tabStateSubscription =
+        widget.tabController.state.listen(_onTabStateChanged);
 
     // Use shared FFI instance from connection manager
     _ffi = TerminalConnectionManager.getConnection(
@@ -103,14 +108,16 @@ class _TerminalPageState extends State<TerminalPage>
 
     // Auto-close tab when shell exits
     _terminalModel.onClosed = () {
-      if (mounted) {
+      if (mounted &&
+          identical(widget.tabController.widget(widget.tabKey), widget)) {
         widget.tabController.closeBy(widget.tabKey);
       }
     };
 
     // Initialize terminal connection
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.tabController.onSelected?.call(widget.id);
+      if (!mounted) return;
+      widget.tabController.onSelected?.call(widget.tabKey);
 
       // Check if this is a new connection or additional terminal
       // Note: When a connection exists, the ref count will be > 1 after this terminal is added
@@ -120,8 +127,8 @@ class _TerminalPageState extends State<TerminalPage>
 
       if (!isExistingConnection) {
         // First terminal - show loading dialog, wait for onReady
-        _ffi.dialogManager
-            .showLoading(translate('Connecting...'), onCancel: closeConnection);
+        _ffi.dialogManager.showLoading(translate('Connecting...'),
+            onCancel: () => closeConnection(sessionId: _ffi.sessionId));
       } else {
         // Additional terminal - connection already established
         // Open the terminal directly
@@ -139,7 +146,7 @@ class _TerminalPageState extends State<TerminalPage>
     _terminalModel.dispose();
     _terminalFocusNode.dispose();
     // Release connection reference instead of closing directly
-    TerminalConnectionManager.releaseConnection(widget.id);
+    TerminalConnectionManager.releaseConnection(widget.id, _ffi);
     super.dispose();
   }
 
@@ -149,6 +156,8 @@ class _TerminalPageState extends State<TerminalPage>
       final selectedTab = state.tabs[state.selected];
       if (selectedTab.key == widget.tabKey && mounted) {
         _requestFocusIfSelected();
+      } else {
+        _terminalFocusNode.unfocus();
       }
     }
   }
@@ -158,7 +167,9 @@ class _TerminalPageState extends State<TerminalPage>
     // Use post-frame callback to ensure widget is fully laid out in focus tree
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Re-check conditions after frame: mounted, focusable, still selected, not already focused
-      if (!mounted || !_terminalFocusNode.canRequestFocus || _terminalFocusNode.hasFocus) return;
+      if (!mounted ||
+          !_terminalFocusNode.canRequestFocus ||
+          _terminalFocusNode.hasFocus) return;
       final state = widget.tabController.state.value;
       if (state.selected >= 0 && state.selected < state.tabs.length) {
         if (state.tabs[state.selected].key == widget.tabKey) {

@@ -106,10 +106,83 @@ pub mod client {
         deferred_pending: bool,
     }
 
+    #[derive(Debug, PartialEq)]
+    enum ReleaseAction {
+        Ignore,
+        Deferred(std::time::Duration, std::time::Instant),
+        Immediate,
+    }
+
+    impl GrabOwnerState {
+        fn release(&mut self, session_id: u128, debounce: Option<std::time::Duration>) -> ReleaseAction {
+            if self.owner != Some(session_id) {
+                return ReleaseAction::Ignore;
+            }
+            if let (Some(debounce), Some(last_grab)) = (debounce, self.last_grab) {
+                let elapsed = last_grab.elapsed();
+                if elapsed < debounce {
+                    if self.deferred_pending {
+                        return ReleaseAction::Ignore;
+                    }
+                    self.deferred_pending = true;
+                    return ReleaseAction::Deferred(
+                        debounce - elapsed + std::time::Duration::from_millis(50), last_grab);
+                }
+            }
+            self.owner = None;
+            self.last_grab = None;
+            self.deferred_pending = false;
+            ReleaseAction::Immediate
+        }
+    }
+
+    #[cfg(test)]
+    mod grab_owner_tests {
+        use super::*;
+        use std::time::{Duration, Instant};
+
+        #[test]
+        fn explicit_deactivation_releases_even_with_pending_x11_feedback() {
+            let mut state = GrabOwnerState {
+                owner: Some(1), last_grab: Some(Instant::now()), deferred_pending: false,
+            };
+            assert!(matches!(state.release(1, Some(Duration::from_millis(300))), ReleaseAction::Deferred(..)));
+            assert_eq!(state.release(1, None), ReleaseAction::Immediate);
+            assert_eq!(state.owner, None);
+            assert_eq!(state.last_grab, None);
+            assert!(!state.deferred_pending);
+            assert_eq!(state.release(1, None), ReleaseAction::Ignore);
+        }
+
+        #[test]
+        fn stale_explicit_deactivation_preserves_the_new_owner() {
+            let now = Instant::now();
+            let mut state = GrabOwnerState {
+                owner: Some(2), last_grab: Some(now), deferred_pending: false,
+            };
+            assert_eq!(state.release(1, None), ReleaseAction::Ignore);
+            assert_eq!(state.owner, Some(2));
+            assert_eq!(state.last_grab, Some(now));
+        }
+
+        #[test]
+        fn pointer_feedback_keeps_its_debounce_and_eventually_releases() {
+            let mut state = GrabOwnerState {
+                owner: Some(1), last_grab: Some(Instant::now()), deferred_pending: false,
+            };
+            let debounce = Some(Duration::from_millis(300));
+            assert!(matches!(state.release(1, debounce), ReleaseAction::Deferred(..)));
+            assert_eq!(state.release(1, debounce), ReleaseAction::Ignore);
+            assert_eq!(state.owner, Some(1));
+            state.last_grab = Some(Instant::now() - Duration::from_secs(1));
+            assert_eq!(state.release(1, debounce), ReleaseAction::Immediate);
+            assert_eq!(state.owner, None);
+        }
+    }
+
     /// How long after a grab acquisition we suppress Wait from the same session.
     /// Must exceed one full X11 feedback cycle (~100 ms: 50 ms enable + 50 ms disable).
-    #[cfg(target_os = "linux")]
-    const GRAB_DEBOUNCE_MS: u128 = 300;
+    const GRAB_DEBOUNCE_MS: u64 = 300;
 
     lazy_static::lazy_static! {
         static ref IS_GRAB_STARTED: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
@@ -159,6 +232,18 @@ pub mod client {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn change_grab_status(state: GrabState, keyboard_mode: &str, session_id: u128) {
+        change_grab_status_impl(state, keyboard_mode, session_id, false);
+    }
+
+    /// A tab/window deactivation is authoritative, unlike X11 focus feedback.
+    #[cfg(feature = "flutter")]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub fn deactivate_session_input(keyboard_mode: &str, session_id: u128) {
+        change_grab_status_impl(GrabState::Wait, keyboard_mode, session_id, true);
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn change_grab_status_impl(state: GrabState, keyboard_mode: &str, session_id: u128, immediate: bool) {
         #[cfg(feature = "flutter")]
         if !IS_RDEV_ENABLED.load(Ordering::SeqCst) {
             return;
@@ -216,59 +301,29 @@ pub mod client {
                 }
             }
             GrabState::Wait => {
-                // Drop stale `Wait` events that do not correspond to the
-                // current grab owner. This prevents a late PointerExit from
-                // session A from releasing session B's freshly acquired grab.
-                if gs.owner != Some(session_id) {
-                    log::debug!(
-                        "[grab] Wait(0x{:x}): ignored, owner={}",
-                        session_id,
-                        gs.owner
-                            .map_or("none".to_string(), |id| format!("0x{:x}", id)),
-                    );
-                    return;
-                }
-
-                // Debounce: on Linux/X11, XGrabKeyboard causes a focus-change
-                // feedback loop (grab -> PointerExit -> ungrab -> PointerEnter ->
-                // grab -> ...). Suppress Wait if the grab was acquired recently
-                // by this same session -- it is X11 feedback, not a real leave.
-                // A deferred release is scheduled so that a genuine leave within
-                // the debounce window is not permanently lost.
-                #[cfg(target_os = "linux")]
-                if let Some(t) = gs.last_grab {
-                    let elapsed = t.elapsed().as_millis();
-                    if elapsed < GRAB_DEBOUNCE_MS {
-                        if !gs.deferred_pending {
-                            log::debug!(
-                                "[grab] Wait(0x{:x}): debounced ({}ms < {}ms), scheduling deferred release",
-                                session_id, elapsed, GRAB_DEBOUNCE_MS,
-                            );
-                            gs.deferred_pending = true;
-                            let remaining = (GRAB_DEBOUNCE_MS - elapsed) as u64 + 50;
-                            let snapshot = gs.last_grab;
+                // Preserve UUID ownership even for an authoritative deactivation.
+                // Only pointer/focus feedback on Linux may defer the release.
+                let debounce = if cfg!(target_os = "linux") && !immediate {
+                    Some(std::time::Duration::from_millis(GRAB_DEBOUNCE_MS))
+                } else {
+                    None
+                };
+                match gs.release(session_id, debounce) {
+                    ReleaseAction::Ignore => return,
+                    ReleaseAction::Immediate => {},
+                    ReleaseAction::Deferred(delay, snapshot) => {
+                        #[cfg(target_os = "linux")]
+                        {
                             let mode = keyboard_mode.to_string();
                             std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(remaining));
+                                std::thread::sleep(delay);
                                 let release_keys = {
                                     let mut gs = GRAB_STATE.lock().unwrap();
-                                    // Release only if no new Run has refreshed the grab since.
-                                    if gs.owner == Some(session_id) && gs.last_grab == snapshot {
-                                        let to_release = take_remote_keys();
-                                        gs.deferred_pending = false;
-                                        log::debug!(
-                                            "[grab] Wait(0x{:x}): deferred release",
-                                            session_id
-                                        );
+                                    if gs.last_grab == Some(snapshot)
+                                        && gs.release(session_id, None) == ReleaseAction::Immediate {
                                         KEYBOARD_HOOKED.store(false, Ordering::SeqCst);
-                                        gs.owner = None;
-                                        gs.last_grab = None;
-                                        Some(to_release)
+                                        Some(take_remote_keys())
                                     } else {
-                                        log::debug!(
-                                            "[grab] Wait(0x{:x}): deferred release cancelled (grab refreshed)",
-                                            session_id,
-                                        );
                                         None
                                     }
                                 };
@@ -277,12 +332,9 @@ pub mod client {
                                     release_remote_keys_for_events(&mode, to_release);
                                 }
                             });
-                        } else {
-                            log::debug!(
-                                "[grab] Wait(0x{:x}): debounced, deferred release already pending",
-                                session_id,
-                            );
                         }
+                        #[cfg(not(target_os = "linux"))]
+                        let _ = (delay, snapshot);
                         return;
                     }
                 }
@@ -295,9 +347,6 @@ pub mod client {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 KEYBOARD_HOOKED.store(false, Ordering::SeqCst);
 
-                gs.owner = None;
-                gs.last_grab = None;
-                gs.deferred_pending = false;
                 release_after_unlock = Some(take_remote_keys());
                 #[cfg(target_os = "linux")]
                 {

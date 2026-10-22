@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 import generate_update_metadata as metadata
+from application_version import parse_version
 from update_metadata_policy import root_artifact_name
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,11 +73,7 @@ def init_key(args):
 
 
 def validate_version(version, release_id):
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
-        metadata.fail("version must be a stable MAJOR.MINOR.PATCH version")
-    parts = [int(part) for part in version.split(".")]
-    if any(part > 65535 for part in parts) or not any(parts):
-        metadata.fail("version components must fit in u16 and must not all be zero")
+    parse_version(version)
     if release_id not in (version, f"v{version}"):
         metadata.fail("release id must equal version, optionally prefixed by v")
 

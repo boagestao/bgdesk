@@ -179,7 +179,7 @@ build_rpm() {
   mkdir -p "${work}"
   local spec="${work}/bgdesk.spec"
   cp res/rpm-flutter.spec "${spec}"
-  sed -i "s/^Version:.*/Version:    ${VERSION}/" "${spec}"
+  sed -i "s/^Version:.*/Version:    ${VERSION/-/.}/" "${spec}"
 
   rm -rf "${HOME}/rpmbuild/RPMS"
   HBB="$(pwd)" rpmbuild -bb "${spec}"

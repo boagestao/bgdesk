@@ -149,6 +149,35 @@ fn accepts_valid_metadata_and_signature() {
 }
 
 #[test]
+fn signed_revision_requires_exact_version_signature_and_architecture() {
+    let prefix = "https://updates.example.com/releases/v1.5.1-2/";
+    let mut data = metadata();
+    data["version"] = json!("1.5.1-2");
+    data["release_id"] = json!("v1.5.1-2");
+    data["artifacts"][0]["url"] = json!(format!("{prefix}rustdesk-1.4.6-x86_64.exe"));
+    let mut fixture = sign_fixture(data, KEY_ID);
+    let keys = [key(fixture.public_key)];
+    let verify_revision = |fixture: &Fixture, version: &str, arch: &str| {
+        verify_update_metadata_with_options(&fixture.metadata, &fixture.signature, VerificationOptions {
+            requirements: MetadataRequirements {
+                expected_version: version, expected_release_id: "v1.5.1-2",
+                artifact: UpdateArtifactQuery { platform: "windows", arch, format: "exe" },
+            },
+            expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+            artifact_url_policy: ArtifactUrlPolicy::ExactPrefix(prefix), trusted_keys: &keys,
+        })
+    };
+    let verified = verify_revision(&fixture, "1.5.1-2", "x86_64").unwrap();
+    assert_eq!(verified.version, "1.5.1-2");
+    assert_eq!(verified.sha256, SHA256);
+    assert_eq!(verified.size, 123456);
+    assert!(verify_revision(&fixture, "1.5.1-1", "x86_64").is_err());
+    assert!(verify_revision(&fixture, "1.5.1-2", "x86").is_err());
+    fixture.metadata.push(b' ');
+    assert!(verify_revision(&fixture, "1.5.1-2", "x86_64").is_err());
+}
+
+#[test]
 fn website_update_metadata_requires_own_edition_even_with_valid_signature() {
     let prefix = format!("{}/", crate::update_source::release_url("v1.4.6"));
     let mut data = metadata();

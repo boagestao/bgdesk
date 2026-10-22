@@ -10,6 +10,14 @@ do RustDesk como segundo pai do merge, mantendo também o histórico do BGDesk.
 
 ## Personalizações mantidas
 
+- Janela unificada do suporte Flutter para remoto, arquivos, câmera, terminal e
+  túneis, fechamento macOS com confirmação por quantidade de sessões e liberação
+  de captura ao trocar de aba,
+  revisões numéricas BGDesk e Windows x86 somente cliente. Antes de integrar novos
+  commits, ler [o guia de preservação e testes](docs/unified-session-tabs.md).
+- Classe/ID Linux próprio do gerenciador de conexões recebidas (`--cm`), com
+  valor `bgdesk.connection-manager`, para regras do Hyprland/gerenciador de janelas.
+
 - Identidade BGDesk, identificadores de aplicativo, recursos e nomes dos pacotes.
 - Submódulo privado `config`, geração das configurações no build e proteção das
   opções de servidor na interface/IPC.
@@ -33,6 +41,9 @@ versionados, usando o commit anterior do manifesto como base. Resolva os
 conflitos mantendo as personalizações acima e atualize o manifesto.
 `scripts/update-rustdesk.sh` é um auxiliar de cópia e relatório; seus avisos de
 merge manual devem ser resolvidos antes de finalizar uma atualização.
+O script de branding preserva versões. A base upstream é 1.5.1, enquanto a
+revisão do aplicativo é 1.5.1-1 (Flutter 1.5.1-1+69); não redefinir a revisão
+nem os locks ao reaplicar branding. A primeira migração é manual.
 
 ## Atualizador assinado
 

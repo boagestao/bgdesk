@@ -1043,7 +1043,7 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
     let release_id = release_id_from_update_url(&response_url)?;
     let latest_release_version = display_version_from_release_id(&release_id)?;
 
-    if get_version_number(&latest_release_version) > get_version_number(crate::VERSION) {
+    if crate::update_source::is_newer_update(&latest_release_version, crate::VERSION)? {
         #[cfg(feature = "flutter")]
         {
             let mut m = HashMap::new();
@@ -3007,6 +3007,14 @@ mod tests {
         let response = serde_json::json!({"url": current}).to_string();
         process_software_update_check_response(Bytes::from(response)).unwrap();
         assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());
+        let [major, minor, patch, revision] = crate::update_source::parse_update_version(crate::VERSION).unwrap();
+        if revision < u16::MAX {
+            let next_revision = crate::update_source::release_url(
+                &format!("v{major}.{minor}.{patch}-{}", revision + 1));
+            let response = serde_json::json!({"url": next_revision}).to_string();
+            process_software_update_check_response(Bytes::from(response)).unwrap();
+            assert_eq!(*SOFTWARE_UPDATE_URL.lock().unwrap(), next_revision);
+        }
         *SOFTWARE_UPDATE_URL.lock().unwrap() = newer.clone();
         process_software_update_check_response(Bytes::from_static(b"{\"url\":\"\"}")).unwrap();
         assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());

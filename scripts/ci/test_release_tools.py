@@ -1,3 +1,4 @@
+from distribution import editions_for_target
 import hashlib
 import importlib.util
 import io
@@ -56,7 +57,7 @@ class ReleaseToolsTests(unittest.TestCase):
         site = self.site()
         records = []
         for platform, arch in plan.artifact_targets():
-            for edition in ('cliente', 'suporte'):
+            for edition in editions_for_target(platform, arch):
                 for fmt, _ in collect.specs(platform, arch, edition):
                     record = dict(edition=edition, platform=platform, arch=arch, format=fmt)
                     name = r2.root_artifact_name(edition, platform, arch, fmt)
@@ -72,17 +73,17 @@ class ReleaseToolsTests(unittest.TestCase):
         site, records = self.root_packages()
         s3, verified = FakeS3(), []
         def verify(origin, key, path, small=False):
-            if len(verified) < 28:
-                self.assertEqual(len(s3.writes), 28)
+            if len(verified) < 26:
+                self.assertEqual(len(s3.writes), 26)
                 self.assertNotIn('/', key)
             verified.append(key)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
                    verify=verify, root_artifacts=True)
         packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst', '.apk'))]
-        self.assertEqual(len(packages), 28)
+        self.assertEqual(len(packages), 26)
         self.assertTrue(all('/' not in key for key in packages))
         self.assertTrue(all(s3.objects[key]['cache'] == 'no-store, max-age=0' for key in packages))
-        self.assertEqual(set(packages), set(verified[:28]))
+        self.assertEqual(set(packages), set(verified[:26]))
         self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
         writes = len(s3.writes)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
@@ -107,10 +108,10 @@ class ReleaseToolsTests(unittest.TestCase):
     def test_root_names_are_unique_including_the_four_future_win32_packages(self):
         _, records = self.root_packages()
         names = {r2.root_artifact_name(r['edition'], r['platform'], r['arch'], r['format']) for r, _ in records}
-        for edition in ('cliente', 'suporte'):
+        for edition in ('cliente',):
             names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'exe'))
             names.add(r2.root_artifact_name(edition, 'windows', 'x86', 'inno-exe'))
-        self.assertEqual(len(names), 28)
+        self.assertEqual(len(names), 26)
         self.assertIn('bgdesk-cliente-win32.exe', names)
         self.assertIn('bgdesk-cliente-update-win32.exe', names)
 
@@ -275,7 +276,7 @@ class ReleaseToolsTests(unittest.TestCase):
     def test_complete_artifact_matrix_and_hashes_are_required(self):
         entries = [dict(platform=platform, arch=arch, edition=edition)
                    for platform, arch in plan.artifact_targets()
-                   for edition in ("cliente", "suporte")]
+                   for edition in editions_for_target(platform, arch)]
         for entry in entries:
             directory = self.root / f"{entry['platform']}-{entry['arch']}-{entry['edition']}"
             directory.mkdir()
@@ -288,7 +289,7 @@ class ReleaseToolsTests(unittest.TestCase):
                                     format=fmt, version="1.5.2", file_name=name, size=10,
                                     sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
             (directory / "artifacts.json").write_text(json.dumps(records))
-        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 28)
+        self.assertEqual(len(r2.read_records(self.root, "1.5.2")), 26)
         chosen = next(self.root.glob("*/artifacts.json"))
         saved = chosen.read_bytes()
         chosen.unlink()
@@ -371,7 +372,7 @@ class ReleaseToolsTests(unittest.TestCase):
         (self.root / 'Cargo.toml').write_text('[package]\nversion = "1.5.2"\n')
         artifacts = self.root / 'artifacts'
         for platform, arch in plan.artifact_targets():
-            for edition in ('cliente', 'suporte'):
+            for edition in editions_for_target(platform, arch):
                 mode = '1' if edition == 'cliente' else '0'
                 local_platform = 'macOS' if platform == 'macos' else platform
                 local_arch = 'arm64' if platform == 'macos' and arch == 'aarch64' else arch
@@ -390,7 +391,7 @@ class ReleaseToolsTests(unittest.TestCase):
                     str(artifacts / f'build-{platform}-{arch}-{edition}'),
                 ], cwd=self.root, check=True)
         records = r2.read_records(artifacts, '1.5.2')
-        self.assertEqual(len(records), 28)
+        self.assertEqual(len(records), 26)
         for record, path in records:
             self.assertEqual(path.read_bytes(),
                              f"{record['platform']}/{record['arch']}/{record['edition']}/{record['format']}".encode())

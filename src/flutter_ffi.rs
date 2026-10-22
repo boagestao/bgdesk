@@ -680,6 +680,16 @@ pub fn session_enter_or_leave(_session_id: SessionID, _enter: bool) -> SyncRetur
     SyncReturn(())
 }
 
+/// Explicit tab/window deactivation must not be debounced as X11 focus feedback.
+pub fn session_deactivate_input(session_id: SessionID) -> SyncReturn<()> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        crate::keyboard::client::deactivate_session_input(
+            &session.get_keyboard_mode(), session_id.as_u128());
+    }
+    SyncReturn(())
+}
+
 pub fn session_input_key(
     session_id: SessionID,
     name: String,

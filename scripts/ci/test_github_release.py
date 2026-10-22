@@ -1,3 +1,4 @@
+from distribution import editions_for_target
 import hashlib
 import base64
 import copy
@@ -116,10 +117,10 @@ class GitHubReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'mismatch'):
                 release.read_edition(self.manifest)
 
-    def test_stable_validates_all_28_packages_but_uploads_only_24_public_packages(self):
+    def test_stable_validates_all_26_packages_but_uploads_only_23_public_packages(self):
         from preflight import artifact_targets
         for platform, arch in artifact_targets():
-            for edition in ('cliente', 'suporte'):
+            for edition in editions_for_target(platform, arch):
                 directory = self.root / f'{platform}-{arch}-{edition}'
                 directory.mkdir()
                 formats = (('apk',) if platform == 'android' else ('exe', 'inno-exe') if platform == 'windows' else ('dmg',) if platform == 'macos'
@@ -140,9 +141,9 @@ class GitHubReleaseTests(unittest.TestCase):
              patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'), patch.object(release, 'release', return_value=None):
             release.main()
         files = upload.call_args.args[-1]
-        self.assertEqual(len(files), 24)
+        self.assertEqual(len(files), 23)
         windows = [p for p in files if '-windows-' in p.name]
-        self.assertEqual(len(windows), 4)
+        self.assertEqual(len(windows), 3)
         self.assertTrue(all('inno-exe' in p.name for p in windows))
 
         # Existing stable GitHub releases must preserve their original tag even
@@ -156,7 +157,7 @@ class GitHubReleaseTests(unittest.TestCase):
             release.main()
         create.assert_not_called()
         self.assertEqual(reconcile.call_args.args[:2], ('boagestao/bgdesk', '1.5.2'))
-        self.assertEqual(len(reconcile.call_args.args[2]), 28)
+        self.assertEqual(len(reconcile.call_args.args[2]), 26)
 
     def existing_stable_fixture(self, missing):
         records, assets = [], []

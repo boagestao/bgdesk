@@ -85,6 +85,9 @@ const double _kPositionEpsilon = 1e-6;
 bool get isMainDesktopWindow =>
     desktopType == DesktopType.main || desktopType == DesktopType.cm;
 
+bool get usesUnifiedSessionTabs =>
+    isDesktop && desktopType == DesktopType.main && !bind.isIncomingOnly();
+
 /// Check if the app is running with single view mode.
 bool isSingleViewApp() {
   return desktopType == DesktopType.cm;
@@ -712,7 +715,7 @@ String formatDurationToTime(Duration duration) {
   return "${totalTime.toString().padLeft(2, "0")}:${mins.toString().padLeft(2, "0")}:${secs.toString().padLeft(2, "0")}";
 }
 
-closeConnection({String? id}) {
+closeConnection({String? id, SessionID? sessionId}) {
   if (isAndroid || isIOS) {
     () async {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
@@ -727,6 +730,23 @@ closeConnection({String? id}) {
       stateGlobal.isInMainPage = true;
     } else {
       final controller = Get.find<DesktopTabController>();
+      if (sessionId != null) {
+        // Never let a delayed error in a background session close the selected tab.
+        var found = false;
+        for (final tab in List<TabInfo>.of(controller.state.value.tabs)) {
+          final page = tab.page;
+          if (tab.sessionId?.call() == sessionId ||
+              page is desktop_remote.RemotePage &&
+                  page.initializedFfi?.sessionId == sessionId ||
+              page is desktop_file_manager.FileManagerPage &&
+                  page.initializedFfi?.sessionId == sessionId) {
+            controller.closeBy(tab.key);
+            found = true;
+          }
+        }
+        // Terminal tabs share a connection UUID: close all siblings, never another peer.
+        if (found || usesUnifiedSessionTabs) return;
+      }
       if (controller.tabType == DesktopTabType.terminal &&
           controller.onCloseWindow != null) {
         // Terminal windows are scoped to one peer. The optional id passed to
@@ -738,7 +758,8 @@ closeConnection({String? id}) {
         }));
         return;
       }
-      controller.closeBy(id);
+      controller
+          .closeBy(usesUnifiedSessionTabs && id != null ? 'remote:$id' : id);
     }
   }
 }
@@ -1204,7 +1225,7 @@ void msgBox(SessionID sessionId, String type, String title, String text,
         value: 'N',
       );
       dialogManager.dismissAll();
-      closeConnection();
+      closeConnection(sessionId: sessionId);
     }
 
     void continueSession() {
@@ -1247,7 +1268,7 @@ void msgBox(SessionID sessionId, String type, String title, String text,
     } else {
       // https://github.com/rustdesk/rustdesk/blob/5e9a31340b899822090a3731769ae79c6bf5f3e5/src/ui/common.tis#L263
       if (!type.contains("custom") && desktopType != DesktopType.portForward) {
-        closeConnection();
+        closeConnection(sessionId: sessionId);
       }
     }
   }
@@ -2873,17 +2894,15 @@ bool _quitInProgress = false;
 
 /// Quit the application when no windows are active or visible.
 ///
-/// On macOS, closing the main window only hides it. The app must stay running
-/// while remote / file-transfer / terminal (etc.) session windows are still
-/// open, and quit only when none remain.
+/// Closing the main window hides it first, then tears down its session tabs.
+/// The process stays running only while other session windows remain.
 Future<void> maybeQuitWhenNoWindows() async {
   if (_quitInProgress) {
     return;
   }
   // Session windows still open → keep the process alive (even if main was hidden).
   if (rustDeskWinManager.hasOpenSessionWindows()) {
-    debugPrint(
-        '[MultiWindowHandler] session windows still open, skip quit');
+    debugPrint('[MultiWindowHandler] session windows still open, skip quit');
     return;
   }
   if (rustDeskWinManager.getActiveWindows().isNotEmpty) {
@@ -3508,6 +3527,11 @@ openMonitorInTheSameTab(int i, FFI ffi, PeerInfo pi,
 // screenRect is used to move the new window to the specified screen and set fullscreen.
 openMonitorInNewTabOrWindow(int i, String peerId, PeerInfo pi,
     {Rect? screenRect}) {
+  if (usesUnifiedSessionTabs) {
+    final ffi = Get.find<FFI>(tag: peerId);
+    openMonitorInTheSameTab(i, ffi, pi);
+    return;
+  }
   final args = {
     'window_id': stateGlobal.windowId,
     'peer_id': peerId,
@@ -4158,7 +4182,8 @@ void earlyAssert() {
 }
 
 bool get usesPublicUpdateChannel =>
-    !isWeb && bind.mainGetCommonSync(key: 'uses-public-update-channel') == 'true';
+    !isWeb &&
+    bind.mainGetCommonSync(key: 'uses-public-update-channel') == 'true';
 
 void checkUpdate() {
   if (!isWeb) {

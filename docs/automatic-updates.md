@@ -21,13 +21,22 @@ para publicação automática, Secrets e os endereços efetivamente compilados.
 O `latest.json` aponta para uma release da mesma edição:
 
 ```json
-{"url":"https://bgdesk.com/updates/suporte/v1.5.2/"}
+{"url":"https://bgdesk.com/updates/suporte/v1.5.1-1/"}
 ```
 
-O aplicativo compara `1.5.2` com sua versão compilada (`Cargo.toml`). Apenas versões
-maiores são oferecidas. Use três números (`MAJOR.MINOR.PATCH`), com prefixo `v`
-opcional na pasta. Não use `latest`, `nightly` ou sufixos como `-rc1` na release.
+O aplicativo compara a versão canônica completa com a compilada em Cargo.
+Aceita `MAJOR.MINOR.PATCH` e `MAJOR.MINOR.PATCH-REVISAO`, com revisão numérica
+positiva, sem zeros à esquerda, até 65535. A ordem é
+`1.5.1 < 1.5.1-1 < 1.5.1-2 < 1.5.1-10 < 1.5.2`.
+A pasta aceita prefixo `v` opcional; não usar `latest`, `nightly`, sufixos
+alfabéticos, `-0` nem quatro componentes na versão canônica.
 `{"url":""}` significa que nenhuma atualização está publicada.
+
+**A migração inicial para 1.5.1-1 é manual.** O atualizador anterior rejeita URLs
+com sufixo. Depois dessa instalação, as revisões seguintes são detectadas
+automaticamente. Mudar apenas o contador Flutter não publica uma nova revisão.
+Consulte [o guia de revisões e integração upstream](unified-session-tabs.md)
+para os formatos nativos e os testes de migração.
 
 No preparo manual legado, dentro da pasta da release ficam os instaladores, `bgdesk-update.json`,
 `bgdesk-update.json.sig` e uma página de download `index.html`. O manifesto informa

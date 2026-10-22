@@ -1,6 +1,7 @@
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:get/get.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../consts.dart';
 import './platform_model.dart';
@@ -40,7 +41,9 @@ class StateGlobal {
   int get windowId => _windowId;
   RxBool get fullscreen => _fullscreen;
   bool get isMinimized => _isMinimized;
-  double get tabBarHeight => fullscreen.isTrue ? 0 : kDesktopRemoteTabBarHeight;
+  double get tabBarHeight => fullscreen.isTrue && !usesUnifiedSessionTabs
+      ? 0
+      : kDesktopRemoteTabBarHeight;
   RxBool get showTabBar => _showTabBar;
   RxDouble get resizeEdgeSize => _resizeEdgeSize;
   RxDouble get windowBorderWidth => _windowBorderWidth;
@@ -79,7 +82,7 @@ class StateGlobal {
   setFullscreen(bool v, {bool procWnd = true}) {
     if (_fullscreen.value != v) {
       _fullscreen.value = v;
-      _showTabBar.value = !_fullscreen.value;
+      _showTabBar.value = usesUnifiedSessionTabs || !_fullscreen.value;
       if (isWebDesktop) {
         procFullscreenWeb();
       } else {
@@ -106,6 +109,10 @@ class StateGlobal {
     print("fullscreen: $fullscreen, resizeEdgeSize: ${_resizeEdgeSize.value}");
     _windowBorderWidth.value = fullscreen.isTrue ? 0 : kWindowBorderWidth;
     if (procWnd) {
+      if (usesUnifiedSessionTabs) {
+        windowManager.setFullScreen(_fullscreen.isTrue);
+        return;
+      }
       final wc = WindowController.fromWindowId(windowId);
       wc.setFullscreen(_fullscreen.isTrue).then((_) {
         // We remove the redraw (width + 1, height + 1), because this issue cannot be reproduced.

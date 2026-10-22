@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show Offset;
 
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/common.dart' show SessionID;
 import 'package:flutter_hbb/common/widgets/keyboard_shortcuts/shortcut_constants.dart';
@@ -14,6 +16,7 @@ import 'package:flutter_hbb/models/local_flutter_shortcuts.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/shortcut_model.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:uuid/uuid.dart';
 
 class _ChatBinding extends Fake implements RustdeskImpl {
@@ -54,6 +57,39 @@ class _Chat extends ChatModel {
 
 class _LegacyBinding extends _ChatBinding {
   final keys = <(String, bool, bool)>[];
+  final mapKeys = <(int, bool)>[];
+  final rawMapKeys = <(String, int, int, bool)>[];
+  final deactivated = <SessionID>[];
+
+  @override
+  void sessionDeactivateInput({required SessionID sessionId, dynamic hint}) {
+    deactivated.add(sessionId);
+  }
+
+  @override
+  Future<void> sessionHandleFlutterKeyEvent({
+    required SessionID sessionId,
+    required String character,
+    required int usbHid,
+    required int lockModes,
+    required bool downOrUp,
+    dynamic hint,
+  }) async {
+    mapKeys.add((usbHid, downOrUp));
+  }
+
+  @override
+  Future<void> sessionHandleFlutterRawKeyEvent({
+    required SessionID sessionId,
+    required String name,
+    required int platformCode,
+    required int positionCode,
+    required int lockModes,
+    required bool downOrUp,
+    dynamic hint,
+  }) async {
+    rawMapKeys.add((name, platformCode, positionCode, downOrUp));
+  }
 
   @override
   bool sessionGetToggleOptionSync(
@@ -125,6 +161,21 @@ class _Session extends Fake implements FFI {
   ConnType get connType => ConnType.defaultConn;
 }
 
+class _CaptureBinding extends _LegacyBinding {
+  final capture = <bool>[];
+  @override
+  String mainGetInputSource({dynamic hint}) => 'Input source 1';
+  @override
+  void sessionEnterOrLeave(
+      {required SessionID sessionId, required bool enter, dynamic hint}) {
+    capture.add(enter);
+  }
+
+  @override
+  Future<void> setCurSessionId(
+      {required SessionID sessionId, dynamic hint}) async {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late _Session session;
@@ -137,6 +188,110 @@ void main() {
   });
 
   tearDown(() => model.clear());
+
+  for (final mode in ['legacy', 'raw-map', 'map']) {
+    test('deactivation releases a held ordinary key exactly once ($mode)',
+        () async {
+      final binding = _LegacyBinding();
+      platformFFI.setBindingForTesting(binding);
+      stateGlobal.getInputSource(force: true);
+      session.ffiModel.pi.platform = kPeerPlatformWindows;
+      var selected = true;
+      final input = InputModel(WeakReference(session))
+        ..keyboardMode = mode == 'legacy' ? kKeyLegacyMode : kKeyMapMode
+        ..isSessionSelected = () => selected;
+      addTearDown(() {
+        input.disposeRelativeMouseMode();
+        RawKeyboard.instance.clearKeysPressed();
+        LocalFlutterShortcutDispatcher.resetFiredKeys();
+        session.ffiModel.dispose();
+      });
+      if (mode == 'map') {
+        input.handleKeyEvent(KeyDownEvent(
+            physicalKey: PhysicalKeyboardKey.keyA,
+            logicalKey: LogicalKeyboardKey.keyA,
+            timeStamp: Duration.zero));
+      } else {
+        await _rawKey(input, scan: 38, key: 0x61, alt: false);
+      }
+      final generation = input.inputActivationGeneration;
+      input.deactivateSessionInput();
+      selected = false;
+      input.deactivateSessionInput(); // A delayed second leave is harmless.
+      if (mode == 'map') {
+        input.handleKeyEvent(KeyUpEvent(
+            physicalKey: PhysicalKeyboardKey.keyA,
+            logicalKey: LogicalKeyboardKey.keyA,
+            timeStamp: Duration.zero));
+      } else {
+        await _rawKey(input, scan: 38, key: 0x61, down: false, alt: false);
+      }
+      await pumpEventQueue();
+      expect(input.inputActivationGeneration, generation + 2);
+      if (mode == 'legacy') {
+        expect(binding.keys, [('VK_A', true, false), ('VK_A', false, false)]);
+      } else if (mode == 'raw-map') {
+        expect(binding.rawMapKeys.map((key) => key.$4), [true, false]);
+        expect(binding.rawMapKeys[0].$2, binding.rawMapKeys[1].$2);
+        expect(binding.rawMapKeys[0].$3, binding.rawMapKeys[1].$3);
+      } else {
+        expect(binding.mapKeys, [(4, true), (4, false)]);
+      }
+      expect(binding.deactivated, [session.sessionId, session.sessionId]);
+    });
+  }
+
+  test('deselect releases capture and modifiers and rejects late focus or keys',
+      () async {
+    final binding = _CaptureBinding();
+    platformFFI.setBindingForTesting(binding);
+    stateGlobal.getInputSource(force: true);
+    var selected = true;
+    final input = InputModel(WeakReference(session))
+      ..isSessionSelected = () => selected;
+    input.enterOrLeave(true);
+    input.ctrl = input.alt = input.shift = input.command = true;
+    input.deactivateSessionInput();
+    selected = false;
+    input.enterOrLeave(true);
+    expect(binding.capture, [true, false]);
+    expect(binding.deactivated, [session.sessionId]);
+    expect([input.ctrl, input.alt, input.shift, input.command],
+        [false, false, false, false]);
+    expect(
+        input.handleKeyEvent(KeyDownEvent(
+            physicalKey: PhysicalKeyboardKey.keyA,
+            logicalKey: LogicalKeyboardKey.keyA,
+            timeStamp: Duration.zero)),
+        KeyEventResult.ignored);
+    expect(
+        input.processEventToPeer(
+            {'type': 'mousedown', 'buttons': 1}, Offset.zero),
+        isNull);
+    input.disposeRelativeMouseMode();
+    platformFFI.setBindingForTesting(_LegacyBinding());
+    stateGlobal.getInputSource(force: true);
+  });
+
+  test('background session cannot dispatch a shortcut or recover after await',
+      () async {
+    var selected = false;
+    var fired = 0;
+    model.isSessionSelected = () => selected;
+    model.register('test-action', () => fired++);
+    model.onTriggered('test-action');
+    await Future<void>.delayed(Duration.zero);
+    expect(fired, 0);
+    selected = true;
+    final pending = Completer<void>();
+    model.registerRefresher(['test-action'], () => pending.future);
+    model.onTriggered('test-action');
+    await Future<void>.delayed(Duration.zero);
+    selected = false;
+    pending.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(fired, 0);
+  });
 
   for (final peer in [
     kPeerPlatformWindows,

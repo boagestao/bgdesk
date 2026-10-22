@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/common/widgets/keyboard_shortcuts/display.dart';
@@ -500,8 +501,13 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   triggerAutoHide() => _debouncerHide.value = _debouncerHide.value + 1;
 
-  void _minimize() async =>
+  void _minimize() async {
+    if (usesUnifiedSessionTabs) {
+      await windowManager.minimize();
+    } else {
       await WindowController.fromWindowId(windowId).minimize();
+    }
+  }
 
   Future<void> _syncDockingOptions({required bool force}) async {
     final syncSerial = ++_dockingOptionSyncSerial;
@@ -805,7 +811,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
     toolbarItems.add(Obx(() {
-      final privacyModeState = PrivacyModeState.find(widget.id);
+      final privacyModeState = PrivacyModeState.find(widget.ffi.sharedStateId);
       if ((privacyModeState.isEmpty ||
               allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
           pi.displaysCount.value > 1 &&
@@ -820,7 +826,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     }
 
     toolbarItems.add(Obx(() {
-      final privacyModeState = PrivacyModeState.find(widget.id);
+      final privacyModeState = PrivacyModeState.find(widget.ffi.sharedStateId);
       if ((privacyModeState.isEmpty ||
               allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
           pi.displaysCount.value > 1) {
@@ -845,6 +851,27 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     // Do not show keyboard for camera connection type.
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
+    }
+    if (isDesktop && widget.ffi.connType == ConnType.defaultConn) {
+      const transferIconInset = 6.0;
+      toolbarItems.add(_IconMenuButton(
+        icon: Padding(
+          padding: const EdgeInsets.all(transferIconInset),
+          child: SvgPicture.asset(
+            'assets/file_transfer.svg',
+            colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+            width: _ToolbarTheme.buttonSize - transferIconInset * 2,
+            height: _ToolbarTheme.buttonSize - transferIconInset * 2,
+          ),
+        ),
+        tooltip: 'Transfer file',
+        color: _ToolbarTheme.blueColor,
+        hoverColor: _ToolbarTheme.hoverBlueColor,
+        onPressed: () => connect(context, widget.id,
+            isFileTransfer: true,
+            connToken:
+                bind.sessionGetConnToken(sessionId: widget.ffi.sessionId)),
+      ));
     }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     if (!isWeb) {
@@ -982,7 +1009,7 @@ class _MonitorCycle {
 
   PeerInfo get _pi => ffi.ffiModel.pi;
   int get total => _pi.displays.length;
-  int get _current => CurrentDisplayState.find(id).value;
+  int get _current => CurrentDisplayState.find(ffi.sharedStateId).value;
   bool get _inRange => _current >= 0 && _current < total;
 
   String get label => _inRange ? '${_current + 1}' : '*';
@@ -1074,7 +1101,9 @@ class _MonitorMenu extends StatelessWidget {
       bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar) == 'Y';
 
   bool get supportIndividualWindows =>
-      !isWeb && ffi.ffiModel.pi.isSupportMultiDisplay;
+      !isWeb &&
+      !usesUnifiedSessionTabs &&
+      ffi.ffiModel.pi.isSupportMultiDisplay;
 
   @override
   Widget build(BuildContext context) {
@@ -1152,7 +1181,7 @@ class _MonitorMenu extends StatelessWidget {
     final pi = ffi.ffiModel.pi;
 
     buildMonitorButton(int i) => Obx(() {
-          RxInt display = CurrentDisplayState.find(id);
+          RxInt display = CurrentDisplayState.find(ffi.sharedStateId);
 
           final isAllMonitors = i == kAllDisplayValue;
           final width = SimpleWrapper<double>(0);
@@ -1212,7 +1241,7 @@ class _MonitorMenu extends StatelessWidget {
       SimpleWrapper<double> width, Color activeTextColor, Color activeBgColor) {
     getMonitors() {
       final pi = ffi.ffiModel.pi;
-      RxInt display = CurrentDisplayState.find(id);
+      RxInt display = CurrentDisplayState.find(ffi.sharedStateId);
       final rect = ffi.ffiModel.globalDisplaysRect();
       if (rect == null) {
         return Offstage();
@@ -1284,7 +1313,7 @@ class _MonitorMenu extends StatelessWidget {
       // If show monitors in toolbar(`buildMultiMonitorMenu()`), then the menu will dismiss automatically.
       _menuDismissCallback(ffi);
     }
-    RxInt display = CurrentDisplayState.find(id);
+    RxInt display = CurrentDisplayState.find(ffi.sharedStateId);
     if (display.value != i) {
       final isChooseDisplayToOpenInNewWindow = pi.isSupportMultiDisplay &&
           bind.sessionGetDisplaysAsIndividualWindows(
@@ -1379,7 +1408,9 @@ class ScreenAdjustor {
 
   Future<bool?> isWindowMaximized() async {
     try {
-      return await WindowController.fromWindowId(windowId).isMaximized();
+      return usesUnifiedSessionTabs
+          ? await windowManager.isMaximized()
+          : await WindowController.fromWindowId(windowId).isMaximized();
     } catch (_) {
       // The delayed resolution callback may run after the window is disposed.
       return null;
@@ -1504,7 +1535,9 @@ class ScreenAdjustor {
       double scale = isWindows ? screen.scaleFactor : 1.0;
       final Rect wndRect;
       try {
-        wndRect = await WindowController.fromWindowId(windowId).getFrame();
+        wndRect = usesUnifiedSessionTabs
+            ? await windowManager.getBounds(ignoreDevicePixelRatio: isWindows)
+            : await WindowController.fromWindowId(windowId).getFrame();
       } catch (e) {
         debugPrint("Failed to get frame of window $windowId, it may be hidden");
         return null;
@@ -1618,6 +1651,12 @@ class ScreenAdjustor {
   }
 
   doAdjustWindow([BuildContext? context]) async {
+    final generation = ffi.inputModel.inputActivationGeneration;
+    bool canAdjust() =>
+        !ffi.closed &&
+        ffi.inputModel.isSessionSelected?.call() != false &&
+        ffi.inputModel.inputActivationGeneration == generation;
+    if (!canAdjust()) return;
     // A resolution change is adjusted after a delay, when the menu context may
     // already be disposed. Each desktop_multi_window window has its own engine,
     // so that engine's first view is the current window.
@@ -1627,6 +1666,7 @@ class ScreenAdjustor {
     }
     final view = context != null ? View.of(context) : views.first;
     await updateScreen();
+    if (!canAdjust()) return;
     if (_screen != null) {
       final wc = WindowController.fromWindowId(windowId);
       final wasFullscreen = isFullscreen;
@@ -1634,25 +1674,35 @@ class ScreenAdjustor {
       if (wasFullscreen) {
         // Wait for the native fullscreen exit to update the window frame.
         await Future.delayed(Duration(milliseconds: 700));
+        if (!canAdjust()) return;
         await updateScreen();
+        if (!canAdjust()) return;
       }
       if (isLinux) {
         final isMaximized = await isWindowMaximized();
+        if (!canAdjust()) return;
         if (isMaximized == null) {
           return;
         }
         if (isMaximized == true) {
           // setFrame may be ignored while the native window is maximized.
           try {
-            await wc.unmaximize();
+            if (usesUnifiedSessionTabs) {
+              await windowManager.unmaximize();
+            } else {
+              await wc.unmaximize();
+            }
           } catch (_) {
             return;
           }
+          if (!canAdjust()) return;
           stateGlobal.setMaximized(false);
           // Wait for the window manager and Flutter view metrics to reflect
           // the restored window before calculating and setting its frame.
           await Future.delayed(Duration(milliseconds: 300));
+          if (!canAdjust()) return;
           await updateScreen();
+          if (!canAdjust()) return;
         }
       }
       final mediaSize = MediaQueryData.fromView(view).size;
@@ -1661,10 +1711,17 @@ class ScreenAdjustor {
         return;
       }
       try {
-        await wc.setFrame(frame);
+        if (!canAdjust()) return;
+        if (usesUnifiedSessionTabs) {
+          await windowManager.setBounds(frame,
+              ignoreDevicePixelRatio: isWindows);
+        } else {
+          await wc.setFrame(frame);
+        }
       } catch (_) {
         return;
       }
+      if (!canAdjust()) return;
       stateGlobal.setMaximized(false);
     }
   }
@@ -1781,7 +1838,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
         toggles(),
       ];
       // privacy mode
-      final privacyModeState = PrivacyModeState.find(id);
+      final privacyModeState = PrivacyModeState.find(ffi.sharedStateId);
       if (ffi.connType == ConnType.defaultConn &&
           (pi.features.privacyMode || privacyModeState.isNotEmpty) &&
           (ffiModel.keyboard || privacyModeState.isNotEmpty)) {
@@ -3014,7 +3071,7 @@ class _CloseMenu extends StatelessWidget {
         if (await showConnEndAuditDialogCloseCanceled(ffi: ffi)) {
           return;
         }
-        closeConnection(id: id);
+        closeConnection(sessionId: ffi.sessionId);
       },
       color: _ToolbarTheme.redColor,
       hoverColor: _ToolbarTheme.hoverRedColor,
@@ -3637,7 +3694,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
               return Offstage();
             } else {
               return buttonWrapper(
-                () => closeConnection(id: widget.id),
+                () => closeConnection(sessionId: widget.ffi.sessionId),
                 Tooltip(
                   message: translate('Close'),
                   child: Icon(
@@ -3772,7 +3829,7 @@ class _MinimizedMonitorSwitchButton extends StatelessWidget {
         return const Offstage();
       }
       if (cycle.total < 2) return const Offstage();
-      final privacyModeState = PrivacyModeState.find(id);
+      final privacyModeState = PrivacyModeState.find(ffi.sharedStateId);
       if (privacyModeState.isNotEmpty &&
           !allowDisplaySwitchInPrivacyMode(
               ffi.ffiModel.pi, privacyModeState.value)) {
