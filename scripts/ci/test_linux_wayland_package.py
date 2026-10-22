@@ -48,7 +48,8 @@ class LinuxWaylandPackageTests(unittest.TestCase):
                      'libs/scrap/src/common/drmtap_dl.rs', 'res/bgdesk.service',
                      'res/bgdesk.desktop', 'res/bgdesk-link.desktop', 'res/128x128@2x.png',
                      'res/scalable.svg', 'res/arch/PKGBUILD', 'res/arch/bgdesk.install',
-                     'res/startwm.sh', 'res/xorg.conf', 'res/pam.d/bgdesk.debian'):
+                     'res/startwm.sh', 'res/xorg.conf', 'res/pam.d/bgdesk.debian',
+                     'res/update/application_version.py'):
             destination = project / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, destination)
@@ -62,6 +63,14 @@ class LinuxWaylandPackageTests(unittest.TestCase):
         shutil.copy2(payload / 'libdrmtap.so.0.5.12', native / 'libdrmtap.so.0.5.12')
         (project / 'libsciter-gtk.so').write_bytes(b'Sciter runtime')
         return project, bundle
+
+    def test_isolated_packaging_tree_can_import_build_and_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project, _ = self.project(Path(temporary))
+            for command in (['python3', '-c', 'import build'],
+                            ['python3', 'scripts/stage-linux-drm.py', '--help']):
+                result = subprocess.run(command, cwd=project, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which('dpkg-deb'), 'Linux DEB tools required')
     def test_deb_folder_packaging_includes_capture_under_normal_package_name(self):
