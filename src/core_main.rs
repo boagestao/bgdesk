@@ -43,6 +43,18 @@ fn finish_macos_update(result: hbb_common::ResultType<()>) -> Option<CoreMainAct
 /// If it returns [`Some`], the action determines whether to start the UI or report failure.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<CoreMainAction> {
+    #[cfg(target_os = "linux")]
+    if std::env::args().nth(1).as_deref() == Some(crate::linux_update::HELPER_COMMAND) {
+        // Handle the privileged command before loading user configuration or starting
+        // any GUI/server. Exit explicitly: the Linux runner otherwise returns 0.
+        match crate::linux_update::run_privileged(&std::env::args().skip(2).collect::<Vec<_>>()) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Linux update failed: {error:#}");
+                std::process::exit(1);
+            }
+        }
+    }
     if !crate::common::global_init() {
         return None;
     }

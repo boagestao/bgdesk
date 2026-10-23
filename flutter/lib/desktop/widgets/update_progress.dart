@@ -14,6 +14,17 @@ Future<void> _handleUpdateMe(
   platformFFI.unregisterEventHandler(_eventKeyUpdateMe, _eventKeyUpdateMe);
   if (evt.containsKey('error')) {
     _showUpdateError(releasePageUrl, evt['error'] as String);
+  } else if (isLinux) {
+    gFFI.dialogManager.dismissAll();
+    if (evt['cancelled'] != 'true') {
+      msgBox(
+          gFFI.sessionId,
+          'custom-nocancel',
+          '{$appName} Update',
+          'Update installed. Restart BGDesk to use the new version.',
+          '',
+          gFFI.dialogManager);
+    }
   }
 }
 
@@ -99,8 +110,13 @@ Future<void> _showVerifyingUpdate() async {
 void _showUpdateError(String releasePageUrl, String error) {
   debugPrint('Update error: $error');
   gFFI.dialogManager.dismissAll();
-  msgBox(gFFI.sessionId, 'custom-nocancel-nook-hasclose', 'Error', error,
-      releasePageUrl, gFFI.dialogManager);
+  msgBox(
+      gFFI.sessionId,
+      'custom-nocancel-nook-hasclose',
+      'Error',
+      'download-new-version-failed-tip',
+      kBgdeskDownloadUrl,
+      gFFI.dialogManager);
 }
 
 class UpdateProgress extends StatefulWidget {
@@ -142,7 +158,8 @@ class UpdateProgressState extends State<UpdateProgress> {
     cancelQueryTimer();
     platformFFI.unregisterEventHandler(
         _eventKeyDownloadNewVersion, _eventKeyDownloadNewVersion);
-    platformFFI.unregisterEventHandler(_eventKeyUpdateMe, _eventKeyUpdateMe);
+    // Installation outlives this download dialog; its result handler owns
+    // cleanup so disposing the download cannot discard the install result.
     super.dispose();
   }
 
@@ -182,7 +199,7 @@ class UpdateProgressState extends State<UpdateProgress> {
     }
 
     jumplink() {
-      launchUrl(Uri.parse(releasePageUrl));
+      launchUrl(Uri.parse(kBgdeskDownloadUrl));
       dialogManager.dismissAll();
     }
 
@@ -192,7 +209,7 @@ class UpdateProgressState extends State<UpdateProgress> {
     }
 
     final List<Widget> buttons = [
-      dialogButton('Download', onPressed: jumplink),
+      dialogButton('JumpLink', onPressed: jumplink),
       dialogButton('Retry', onPressed: retry),
       dialogButton('Close', onPressed: close),
     ];
@@ -276,6 +293,15 @@ class UpdateProgressState extends State<UpdateProgress> {
         platformFFI.registerEventHandler(_eventKeyUpdateMe, _eventKeyUpdateMe,
             (evt) => _handleUpdateMe(releasePageUrl, evt),
             replace: true);
+        if (isLinux) {
+          gFFI.dialogManager.show<void>(
+              (setState, close, context) => CustomAlertDialog(
+                    title: Text(translate('Installing ...')),
+                    content: const LinearProgressIndicator(),
+                    actions: const [],
+                  ),
+              tag: 'installing-update');
+        }
         try {
           await bind.mainSetCommon(key: 'update-me', value: downloadUrl);
         } catch (error) {

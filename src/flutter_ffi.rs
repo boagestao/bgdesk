@@ -2787,14 +2787,14 @@ pub fn main_get_common(key: String) -> String {
                 }
             }
         } else if let Some(release_page_url) = key.strip_prefix("verified-download-url-") {
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             {
                 return match verified_update_artifact_for_release_page_url(release_page_url) {
                     Ok(artifact) => artifact.url,
                     Err(e) => format!("error:{}", e),
                 };
             }
-            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
             {
                 "error:unsupported".to_owned()
             }
@@ -2813,7 +2813,7 @@ pub fn main_get_common_sync(key: String) -> SyncReturn<String> {
     SyncReturn(main_get_common(key))
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn push_update_me_error(error: String) {
     let data = HashMap::from([("name", "update-me".to_owned()), ("error", error)]);
     let _res = flutter::push_global_event(
@@ -2822,7 +2822,7 @@ fn push_update_me_error(error: String) {
     );
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn verified_update_artifact_for_release_page_url(
     release_page_url: &str,
 ) -> ResultType<crate::update_metadata::VerifiedUpdateArtifact> {
@@ -2830,7 +2830,10 @@ fn verified_update_artifact_for_release_page_url(
     let update_msi = crate::platform::windows::is_msi_installed()? && !crate::is_custom_client();
     #[cfg(target_os = "macos")]
     let update_msi = false;
+    #[cfg(not(target_os = "linux"))]
     let query = crate::updater::current_update_artifact_query(update_msi);
+    #[cfg(target_os = "linux")]
+    let query = crate::linux_update::artifact_query()?;
     crate::updater::verified_update_artifact_for_release_page_url(release_page_url, query)
 }
 
@@ -2867,7 +2870,7 @@ pub fn main_set_common(_key: String, _value: String) {
             );
         });
     }
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         use crate::updater::get_update_download_file_from_url;
         if _key == "download-new-version" {
@@ -2948,6 +2951,18 @@ pub fn main_set_common(_key: String, _value: String) {
                 &artifact.sha256,
                 Some(artifact.size),
             );
+            #[cfg(target_os = "linux")]
+            let update_res = (|| -> ResultType<()> {
+                let feed = crate::updater::verified_update_feed_for_download_url(&artifact.url)?;
+                let outcome = crate::linux_update::apply(&new_version_file, &artifact, &feed)?;
+                let cancelled = outcome == crate::linux_update::UpdateOutcome::Cancelled;
+                if !cancelled {
+                    crate::updater::remove_update_file(&new_version_file);
+                }
+                let data = serde_json::json!({"name": "update-me", "cancelled": cancelled.to_string()});
+                let _ = flutter::push_global_event(flutter::APP_TYPE_MAIN, data.to_string());
+                Ok(())
+            })();
             if update_res.is_err() {
                 crate::updater::remove_update_file(&new_version_file);
             }

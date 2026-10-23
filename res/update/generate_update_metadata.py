@@ -35,7 +35,7 @@ def fail(message):
 
 
 def stable_json(value):
-    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return json.dumps(value, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
 
 
 def write_bytes(path, data):
@@ -189,10 +189,33 @@ def validated_artifacts(metadata, local_artifacts):
     return artifacts
 
 
+def latest_bytes(metadata_bytes, signature_bytes):
+    document = json.loads(metadata_bytes)
+    if stable_json(document) != metadata_bytes:
+        fail("latest metadata must use canonical JSON")
+    document['signature'] = json.loads(signature_bytes)
+    return stable_json(document)
+
+
+def read_latest(raw):
+    document = json.loads(raw)
+    signature = document.pop('signature', None)
+    if not isinstance(signature, dict):
+        fail("latest.json is missing its signature")
+    return stable_json(document), signature
+
+
+def command_verify_latest(args):
+    metadata_bytes, signature = read_latest(Path(args.metadata).read_bytes())
+    verify_document(args, metadata_bytes, signature)
+
+
 def command_verify(args):
-    metadata_bytes = Path(args.metadata).read_bytes()
+    verify_document(args, Path(args.metadata).read_bytes(), json.loads(Path(args.signature).read_bytes()))
+
+
+def verify_document(args, metadata_bytes, signature):
     metadata = json.loads(metadata_bytes)
-    signature = json.loads(Path(args.signature).read_bytes())
     verify_metadata_signature(metadata_bytes, signature)
     package_id = validate_or_fail(validate_package_id, args.package_id)
     release_base_url = validate_or_fail(

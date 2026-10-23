@@ -191,9 +191,12 @@ duas revisões; não publicar um pacote falso só para testar.
 
 ## Publicação e reaproveitamento
 
-Tags e diretórios de metadados usam `v1.5.1-1`. O `latest.json` da mesma edição
-aponta para esse diretório. Assinatura, seletores, tamanho, hash e origem mantêm
-suas verificações. Pacotes permanecem uma única vez na raiz do R2.
+Tags usam `v1.5.1-3`. O feed `updates/<edição>/latest.json` contém a versão
+canônica, a lista de arquivos e a assinatura Ed25519. O aplicativo verifica o
+próprio feed e seleciona seu pacote sem buscar metadados em pastas de versão.
+Não criar novas pastas por atualização. Pacotes permanecem uma única vez na raiz
+do R2; seletores, tamanho, hash e origem mantêm suas verificações. Erros da
+interface abrem `https://bgdesk.com`.
 
 Reutilizar por **versão canônica completa e alvo**, sem invalidar por commit:
 1.5.1 e 1.5.1-1 não são a mesma build. Validar os arquivos reais de todas as

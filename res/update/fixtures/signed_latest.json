@@ -1,0 +1,30 @@
+{
+  "public_key": "eBBsH6uOkSqa0xu3ED+Ef1S2+pUDcrAV+pgUwV+YOA8=",
+  "latest": {
+    "schema_version": 1,
+    "app": "rustdesk",
+    "package_id": "bgdesk-suporte",
+    "version": "1.5.1-3",
+    "release_id": "v1.5.1-3",
+    "published_at": "2026-10-23T12:00:00Z",
+    "signature_key_id": "test-ed25519-main",
+    "artifacts": [
+      {
+        "platform": "windows",
+        "arch": "x86_64",
+        "format": "exe",
+        "file_name": "bgdesk-suporte-update-win64.exe",
+        "url": "https://bgdesk.com/bgdesk-suporte-update-win64.exe",
+        "size": 123456,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "notes": "Atualização — ação\nWindows / macOS",
+    "signature": {
+      "schema_version": 1,
+      "algorithm": "ed25519",
+      "key_id": "test-ed25519-main",
+      "signature": "Eauk/9h65iv2CahbwWyZlmGvnOHNy6bWoIXOV7y3FjZO981KMf58GyRG/FfxTyUfubYBoAR9poiWf7styRg8AQ=="
+    }
+  }
+}

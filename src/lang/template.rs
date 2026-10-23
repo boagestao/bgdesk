@@ -380,6 +380,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("ubuntu-21-04-required", ""),
         ("wayland-requires-higher-linux-version", ""),
         ("xdp-portal-unavailable", ""),
+        ("Update installed. Restart BGDesk to use the new version.", ""),
         ("JumpLink", ""),
         ("Please Select the screen to be shared(Operate on the peer side).", ""),
         ("Show BGDesk", ""),

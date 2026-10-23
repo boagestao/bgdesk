@@ -112,10 +112,15 @@ class AndroidTests(unittest.TestCase):
             stage.mkdir()
             with patch.object(publish.metadata, 'command_check_key'), patch.object(publish.subprocess, 'check_output', return_value='2026-10-20T12:00:00Z'):
                 return publish.prepare(s3, 'bucket', records, '1.5.1', 'https://download.bgdesk.com', stage, key)
+        # The publisher can replace the old pointer without serving old clients.
+        for edition in ('cliente', 'suporte'):
+            s3.objects[f'updates/android/{edition}/latest.json'] = b'{"url":"https://download.bgdesk.com/old/"}'
         packages, sidecars = prepare('first')
         self.assertEqual({name for name, _ in packages}, {'bgdesk-cliente-universal.apk', 'bgdesk-suporte-universal.apk'})
         for name, path in sidecars:
-            self.assertTrue(name.startswith('updates/android/'))
+            self.assertIn(name, {'updates/android/cliente/latest.json', 'updates/android/suporte/latest.json'})
+            self.assertIn('signature', json.loads(path.read_bytes()))
+            self.assertEqual(json.loads(path.read_bytes())['version'], '1.5.1')
             s3.objects[name] = path.read_bytes()
         original = dict(s3.objects)
         _, retried = prepare('retry')

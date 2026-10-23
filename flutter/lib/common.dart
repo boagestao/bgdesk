@@ -4193,6 +4193,8 @@ void checkUpdate() {
           (Map<String, dynamic> evt) async {
         if (evt['url'] is String) {
           stateGlobal.updateUrl.value = evt['url'];
+          // The signed feed URL stays the same when its version changes.
+          stateGlobal.updateUrl.refresh();
         }
       });
       Timer(const Duration(seconds: 1), () async {

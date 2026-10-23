@@ -115,7 +115,8 @@ def root_artifact_name(edition, platform, arch, file_format):
             return f"{prefix}-{arch}.{file_format}"
     if platform == "macos" and arch in ("x86_64", "aarch64") and file_format == "dmg":
         return f"{prefix}-{arch}.dmg"
-    if platform == "windows" and arch in ("x86_64", "x86") and file_format in ("exe", "inno-exe"):
+    if platform == "windows" and arch in ("x86_64", "x86") and file_format in ("exe", "inno-exe", "msi"):
         suffix = "win32" if arch == "x86" else "win64"
-        return f"{prefix}{'-update' if file_format == 'exe' else ''}-{suffix}.exe"
+        extension = "msi" if file_format == "msi" else "exe"
+        return f"{prefix}{'-update' if file_format == 'exe' else ''}-{suffix}.{extension}"
     raise ValueError("Unsupported root artifact selector")

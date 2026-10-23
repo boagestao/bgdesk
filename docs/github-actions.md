@@ -195,10 +195,10 @@ releases. Mudar de domínio exige manter os canais anteriores acessíveis.
    de atualização Windows (`bgdesk-<edição>-update-win64.exe`) é diferente do
    instalador Inno (`bgdesk-<edição>-win64.exe`); ambos são necessários, não são
    cópias do mesmo executável. Win32 usa os sufixos correspondentes `win32`.
-5. Verifica os pacotes na raiz e publica somente JSON, assinatura e página de
-   download nas pastas `updates/<edição>/v<versão>/`. Não envia uma segunda
-   cópia dos pacotes para essas pastas. Atualiza os scripts de instalação Mac
-   e, por último, os dois `latest.json` com `no-store`.
+5. Verifica os pacotes na raiz, atualiza os scripts de instalação Mac e publica
+   por último `updates/<edição>/latest.json` com `no-store`. Cada JSON contém a
+   versão, todos os arquivos e a assinatura Ed25519 embutida. Não cria pastas de
+   versão, sidecars online nem páginas `index.html`.
 
 O site usa os scripts do bucket para instalar o DMG correto para Intel ou Apple
 Silicon. Esses scripts verificam a equipe Apple, a assinatura e o Gatekeeper.
@@ -206,8 +206,9 @@ O workflow não sobrescreve o restante do site nem exige publicar uma nova build
 React a cada versão. As alterações iniciais do site ainda precisam do deploy
 normal do repositório `bgdesk-webpage`.
 
-Os manifestos assinados e a identidade de cada versão publicada são imutáveis;
-o histórico de binários fica no GitHub Releases. No R2 os pacotes na raiz são
+A identidade de cada versão publicada é imutável: uma tentativa da mesma versão
+precisa manter os mesmos bytes assinados e pacotes. O `latest.json` é substituído
+apenas por uma versão superior; o histórico de binários fica no GitHub Releases. No R2 os pacotes na raiz são
 substituídos pela nova versão, com `no-store`, sem acumular cópias por versão.
 Se um push não altera uma versão já publicada,
 os builds continuam rodando, mas o envio da release é pulado. Para disponibilizar
@@ -221,13 +222,14 @@ Builds que falham não ativam os canais. Jobs são serializados para
 evitar uma execução antiga anunciar uma versão depois de outra mais recente.
 
 Os artefatos ficam disponíveis na execução por 14 dias, inclusive nos testes
-manuais sem publicação. O download Linux é publicado, mas a instalação automática
-interna continua limitada a Windows/macOS, conforme o atualizador existente.
+manuais sem publicação. No Linux, a interface baixa e instala DEB/RPM/Arch com autorização gráfica
+Polkit; o AppImage é substituído sem root. O serviço Linux não instala atualizações
+silenciosamente. Os pacotes declaram a dependência de `pkexec`/`polkit`.
 Os APKs são publicados na raiz do R2 como `bgdesk-cliente-universal.apk` e
 `bgdesk-suporte-universal.apk`, compartilhados com os downloads do site. Os hashes
-assinados ficam em `updates/android/<edição>/v1.5.1/`, sem duplicar APKs nesses
-diretórios. Esse canal tem metadados próprios e preserva os metadados desktop já
-assinados. A inclusão dos APKs na release estável GitHub também preserva o tag e
+assinados, versão e lista de arquivos ficam em
+`updates/android/<edição>/latest.json`, com assinatura embutida e sem pastas de
+versão. Esse canal tem metadados próprios e preserva os feeds desktop. A inclusão dos APKs na release estável GitHub também preserva o tag e
 os bytes dos assets existentes. Isso não implementa instalação automática no Android.
 Windows ARM64 e iOS continuam fora desta matriz de distribuição.
 

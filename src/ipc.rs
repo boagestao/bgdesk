@@ -497,7 +497,7 @@ pub enum Data {
     #[cfg(target_os = "windows")]
     PortForwardSessionCount(Option<usize>),
     SocksWs(Option<Box<(Option<config::Socks5Server>, String)>>),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     HasNoActiveConns(Option<bool>),
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     Whiteboard((String, crate::whiteboard::CustomEvent)),
@@ -1134,7 +1134,7 @@ async fn handle(data: Data, stream: &mut Connection) {
                     .await
             );
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         Data::HasNoActiveConns(None) => {
             allow_err!(
                 stream
@@ -1424,7 +1424,7 @@ fn select_server_uid_for_user_main_ipc(
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn running_server_uids_for_current_exe() -> ResultType<Vec<u32>> {
+pub(crate) fn running_server_uids_for_current_exe() -> ResultType<Vec<u32>> {
     let current_exe = std::env::current_exe()?;
     let current_exe_path = std::fs::canonicalize(&current_exe)?;
     let current_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());

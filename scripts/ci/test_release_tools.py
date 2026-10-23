@@ -61,12 +61,11 @@ class ReleaseToolsTests(unittest.TestCase):
                 for fmt, _ in collect.specs(platform, arch, edition):
                     record = dict(edition=edition, platform=platform, arch=arch, format=fmt)
                     name = r2.root_artifact_name(edition, platform, arch, fmt)
-                    path = site / 'updates' / edition / 'v1.5.2' / name
+                    path = site / name
                     path.write_bytes(('package-' + name).encode())
                     record.update(file_name='versioned-' + name, size=path.stat().st_size,
                                   sha256=r2.file_hash(path))
                     records.append((record, path))
-                (site / 'updates' / edition / 'v1.5.2' / 'bgdesk.dmg').unlink(missing_ok=True)
         return site, records
 
     def test_packages_are_uploaded_once_at_root_before_metadata_or_latest(self):
@@ -78,7 +77,7 @@ class ReleaseToolsTests(unittest.TestCase):
                 self.assertNotIn('/', key)
             verified.append(key)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
-                   verify=verify, root_artifacts=True)
+                   verify=verify)
         packages = [key for key in s3.writes if key.endswith(('.exe', '.dmg', '.deb', '.rpm', '.AppImage', '.pkg.tar.zst', '.apk'))]
         self.assertEqual(len(packages), 26)
         self.assertTrue(all('/' not in key for key in packages))
@@ -87,7 +86,7 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
         writes = len(s3.writes)
         r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
-                   verify=lambda *a, **kw: None, root_artifacts=True)
+                   verify=lambda *a, **kw: None)
         self.assertEqual(len(s3.writes), writes)
 
     def test_root_verification_failure_never_activates_metadata_or_feed(self):
@@ -97,12 +96,12 @@ class ReleaseToolsTests(unittest.TestCase):
             raise ValueError('Root download unavailable')
         with self.assertRaisesRegex(ValueError, 'Root download'):
             r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
-                       verify=fail, root_artifacts=True)
+                       verify=fail)
         self.assertTrue(all('/' not in key for key in s3.writes))
         records[-1][1].write_bytes(b'tampered')
         s3 = FakeS3()
         with self.assertRaisesRegex(ValueError, 'differs from the build'):
-            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2', root_artifacts=True)
+            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2')
         self.assertEqual(s3.writes, [])
 
     def test_root_names_are_unique_including_the_four_future_win32_packages(self):
@@ -133,37 +132,37 @@ class ReleaseToolsTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def site(self):
-        for edition in ("cliente", "suporte"):
-            channel = self.root / "updates" / edition
-            release = channel / "v1.5.2"
-            release.mkdir(parents=True)
-            (release / "bgdesk.dmg").write_bytes(b"installer")
-            (release / "bgdesk-update.json").write_bytes(b"signed metadata")
-            (release / "bgdesk-update.json.sig").write_bytes(b"signature")
-            (channel / "latest.json").write_text('{"url":"release"}')
+        for edition in ('cliente', 'suporte'):
+            channel = self.root / 'updates' / edition
+            channel.mkdir(parents=True)
+            (channel / 'latest.json').write_text(json.dumps(dict(
+                version='1.5.2', release_id='v1.5.2', signature={'signature': 'test'}, artifacts=[])))
         return self.root
 
-    def test_both_editions_are_uploaded_and_publicly_verified_before_any_announcement(self):
-        s3 = FakeS3()
-        verified = []
-        def verify(origin, key, path, small=False):
-            if not key.endswith("latest.json"):
-                self.assertEqual(len(s3.writes), 6)
-                self.assertFalse(any(item.endswith('latest.json') for item in s3.writes))
-            verified.append(key)
-        r2.publish(s3, "bucket", self.site(), [], "https://bgdesk.com", "v1.5.2", verify)
-        self.assertEqual(s3.writes[-2:], ["updates/cliente/latest.json", "updates/suporte/latest.json"])
-        self.assertEqual(len(verified), 8)
-        self.assertEqual(s3.objects[s3.writes[-1]]["cache"], "no-store, max-age=0")
-        self.assertIn("immutable", s3.objects[s3.writes[0]]["cache"])
+    def test_feed_is_activated_after_packages_without_version_directories(self):
+        site, records = self.root_packages()
+        s3, verified = FakeS3(), []
+        r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2',
+                   lambda origin, key, path, small=False: verified.append(key))
+        self.assertEqual(s3.writes[-2:], ['updates/cliente/latest.json', 'updates/suporte/latest.json'])
+        self.assertFalse(any('/v1.5.2/' in key for key in s3.writes))
+        self.assertTrue(all(s3.objects[key]['cache'] == 'no-store, max-age=0' for key in s3.writes))
 
-    def test_failed_public_verification_preserves_all_previous_announcements(self):
+    def test_changed_feed_same_version_and_rollback_are_rejected_before_package_upload(self):
+        site, records = self.root_packages()
         s3 = FakeS3()
-        def fail(*args, **kwargs):
-            raise ValueError("SPA fallback or inaccessible public URL")
-        with self.assertRaises(ValueError):
-            r2.publish(s3, "bucket", self.site(), [], "https://bgdesk.com", "v1.5.2", fail)
-        self.assertFalse(any(key.endswith("latest.json") for key in s3.writes))
+        r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2', verify=lambda *a, **k: None)
+        writes = len(s3.writes)
+        latest = site / 'updates/suporte/latest.json'
+        latest.write_text(latest.read_text() + ' ')
+        with self.assertRaisesRegex(ValueError, 'different bytes'):
+            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.2')
+        latest.write_text(json.dumps(dict(version='1.5.1', release_id='v1.5.1', signature={'signature':'test'})))
+        other = site / 'updates/cliente/latest.json'
+        other.write_bytes(latest.read_bytes())
+        with self.assertRaisesRegex(ValueError, 'roll back'):
+            r2.publish(s3, 'bucket', site, records, 'https://bgdesk.com', 'v1.5.1')
+        self.assertEqual(len(s3.writes), writes)
 
     def test_immutable_objects_can_be_retried_but_never_changed(self):
         s3 = FakeS3()
@@ -229,7 +228,7 @@ class ReleaseToolsTests(unittest.TestCase):
         for call in prepare.call_args_list:
             command = call.args[0]
             self.assertEqual(command[command.index('--published-at') + 1], stamp)
-            self.assertIn('--root-artifacts', command)
+            self.assertNotIn('--root-artifacts', command)
         marker = json.loads(s3.objects['updates/releases/v1.5.2.json']['body'])
         self.assertEqual(marker['commit'], source_commit)
         self.assertEqual(marker['artifact_layout'], 'root')

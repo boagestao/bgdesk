@@ -7,7 +7,6 @@ use url::Url;
 
 #[derive(Clone, Copy)]
 pub(super) enum ArtifactUrlPolicy<'a> {
-    #[cfg(test)]
     ExactPrefix(&'a str),
     ReleaseOrRoot {
         release_prefix: &'a str,
@@ -48,7 +47,6 @@ fn validate_artifact_url_policy(
     policy: ArtifactUrlPolicy<'_>,
 ) -> ResultType<()> {
     match policy {
-        #[cfg(test)]
         ArtifactUrlPolicy::ExactPrefix(prefix) => {
             let expected_url = format!("{}{}", prefix, artifact.file_name);
             if artifact.url != expected_url {

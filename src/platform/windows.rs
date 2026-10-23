@@ -4585,9 +4585,9 @@ fn get_pids<S: AsRef<str>>(name: S) -> ResultType<Vec<u32>> {
 pub fn is_msi_installed() -> std::io::Result<bool> {
     let (subkey, _, _, _) = get_install_info();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let install_key = hklm.open_subkey(subkey.strip_prefix(HKLM_PREFIX).unwrap_or(&subkey))?;
-    Ok(MSI_WINDOWS_INSTALLER_VALUE
-        == install_key.get_value::<u32, _>(REG_NAME_WINDOWS_INSTALLER)?)
+    msi_registry::is_msi_installed(
+        hklm.open_subkey(subkey.strip_prefix(HKLM_PREFIX).unwrap_or(&subkey)),
+    )
 }
 
 pub fn is_cur_exe_the_installed() -> bool {

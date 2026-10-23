@@ -1,16 +1,10 @@
-use crate::{
-    common::{display_version_from_release_id, release_id_from_update_url},
-    hbbs_http::create_http_client_with_url_strict,
-    update_metadata::{UpdateArtifactQuery, UpdateMetadataRequirements, VerifiedUpdateArtifact},
-};
+use crate::update_metadata::{UpdateArtifactQuery, VerifiedUpdateArtifact};
 use hbb_common::{bail, ResultType};
-use std::{io::Read, path::PathBuf, sync::Mutex, time::Duration};
-
-const UPDATE_SIDECAR_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const UPDATE_METADATA_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
+use std::{path::PathBuf, sync::Mutex};
 
 lazy_static::lazy_static! {
-    static ref VERIFIED_UPDATE_ARTIFACT: Mutex<Option<VerifiedUpdateArtifact>> = Mutex::new(None);
+    static ref VERIFIED_UPDATE_FEED: Mutex<Option<crate::update_metadata::VerifiedUpdateFeed>> = Mutex::new(None);
+    static ref VERIFIED_UPDATE_ARTIFACT: Mutex<Option<(VerifiedUpdateArtifact, Vec<u8>)>> = Mutex::new(None);
 }
 
 pub(crate) fn current_update_platform() -> &'static str {
@@ -78,8 +72,10 @@ pub fn verified_update_artifact_for_release_page_url(
     release_page_url: &str,
     query: UpdateArtifactQuery<'_>,
 ) -> ResultType<VerifiedUpdateArtifact> {
-    let artifact = verified_update_artifact_from_release_page_url(release_page_url, &query)?;
-    *VERIFIED_UPDATE_ARTIFACT.lock().unwrap() = Some(artifact.clone());
+    let feed = verified_feed_for_url(release_page_url)?;
+    let artifact = feed.artifact(&query)?;
+    *VERIFIED_UPDATE_ARTIFACT.lock().unwrap() =
+        Some((artifact.clone(), feed.signed_bytes().to_vec()));
     Ok(artifact)
 }
 
@@ -90,68 +86,71 @@ pub fn verified_update_artifact_for_download_url(
         .lock()
         .unwrap()
         .as_ref()
-        .filter(|artifact| artifact.url == download_url)
-        .cloned()
+        .filter(|(artifact, _)| artifact.url == download_url)
+        .map(|(artifact, _)| artifact.clone())
         .ok_or_else(|| hbb_common::anyhow::anyhow!("update artifact was not verified"))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn verified_update_feed_for_download_url(download_url: &str) -> ResultType<Vec<u8>> {
+    VERIFIED_UPDATE_ARTIFACT
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|(artifact, _)| artifact.url == download_url)
+        .map(|(_, bytes)| bytes.clone())
+        .ok_or_else(|| hbb_common::anyhow::anyhow!("update artifact was not verified"))
+}
+
+pub(crate) fn cache_update_feed(feed: crate::update_metadata::VerifiedUpdateFeed) {
+    *VERIFIED_UPDATE_FEED.lock().unwrap() = Some(feed);
+}
+
+pub(crate) fn clear_update_feed() {
+    *VERIFIED_UPDATE_FEED.lock().unwrap() = None;
+}
+
+pub(crate) fn latest_update_version() -> String {
+    VERIFIED_UPDATE_FEED
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|feed| feed.version().to_owned())
+        .unwrap_or_default()
 }
 
 pub(super) fn verified_update_artifact_from_release_page_url(
     update_url: &str,
     query: &UpdateArtifactQuery<'_>,
 ) -> ResultType<VerifiedUpdateArtifact> {
+    verified_feed_for_url(update_url)?.artifact(query)
+}
+
+fn verified_feed_for_url(
+    update_url: &str,
+) -> ResultType<crate::update_metadata::VerifiedUpdateFeed> {
     if !crate::common::uses_public_update_channel() {
         bail!("Public update channel is not enabled for this client");
     }
-    let release_id = release_id_from_update_url(update_url)?;
-    let display_version = display_version_from_release_id(&release_id)?;
-    let expected_artifact_url_prefix =
-        format!("{}/", crate::update_source::release_url(&release_id));
-    let metadata_url = format!("{expected_artifact_url_prefix}bgdesk-update.json");
-    let signature_url = format!("{metadata_url}.sig");
-    let metadata_bytes = fetch_update_sidecar_bytes(&metadata_url)?;
-    let signature_bytes = fetch_update_sidecar_bytes(&signature_url)?;
-    let requirements = UpdateMetadataRequirements {
-        expected_version: display_version.as_str(),
-        expected_release_id: release_id.as_str(),
-        expected_artifact_url_prefix: expected_artifact_url_prefix.as_str(),
-        artifact: *query,
-    };
-    crate::update_metadata::verify_update_metadata(&metadata_bytes, &signature_bytes, requirements)
-}
-
-fn fetch_update_sidecar_bytes(url: &str) -> ResultType<Vec<u8>> {
-    let client = create_http_client_with_url_strict(url)?;
-    let mut response = client
-        .get(url)
-        .timeout(UPDATE_SIDECAR_HTTP_REQUEST_TIMEOUT)
-        .send()?;
-    if !response.status().is_success() {
-        bail!(
-            "Failed to download update metadata sidecar: {}",
-            response.status()
-        );
+    if update_url != crate::update_source::latest_url() {
+        bail!("Update URL is not the BGDesk signed latest feed");
     }
-    read_limited_response_bytes(
-        &mut response,
-        UPDATE_METADATA_SIDECAR_MAX_BYTES,
-        "Update metadata sidecar",
-    )
-}
-
-fn read_limited_response_bytes<R: Read>(
-    reader: &mut R,
-    limit: u64,
-    what: &str,
-) -> ResultType<Vec<u8>> {
-    let mut limited_reader = reader.take(limit.saturating_add(1));
-    let mut bytes = Vec::new();
-    limited_reader.read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit {
-        bail!("{what} exceeds maximum allowed size of {limit} bytes");
-    }
-    Ok(bytes)
+    VERIFIED_UPDATE_FEED
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or_else(|| {
+            hbb_common::anyhow::anyhow!(
+                "No verified update feed available; check for updates again"
+            )
+        })
+        .cloned()
 }
 
 pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    return crate::update_source::download_file_name(url)
+        .and_then(|name| crate::linux_update::download_path(name).ok());
+    #[cfg(not(target_os = "linux"))]
     crate::update_source::download_file_name(url).map(|name| std::env::temp_dir().join(name))
 }

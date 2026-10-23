@@ -55,6 +55,107 @@ fn valid_fixture() -> Fixture {
 }
 
 #[test]
+fn latest_canonical_json_verifies_the_python_publication_vector() {
+    let fixture: Value = serde_json::from_str(include_str!("../res/update/fixtures/signed_latest.json")).unwrap();
+    let public_key: [u8; 32] = STANDARD.decode(fixture["public_key"].as_str().unwrap()).unwrap().try_into().unwrap();
+    let mut latest = fixture["latest"].clone();
+    let signature = latest.as_object_mut().unwrap().remove("signature").unwrap();
+    let signature: UpdateSignature = serde_json::from_value(signature).unwrap();
+    let bytes = canonical_latest_json(&latest).unwrap();
+    verify_metadata_signature(&bytes, &decode_signature(&signature.signature).unwrap(), &key(public_key)).unwrap();
+    let mut tampered = latest;
+    tampered["version"] = json!("1.5.1-4");
+    assert!(verify_metadata_signature(&canonical_latest_json(&tampered).unwrap(),
+        &decode_signature(&signature.signature).unwrap(), &key(public_key)).is_err());
+}
+
+#[test]
+fn latest_feed_authenticates_version_and_all_artifacts_from_one_document() {
+    let name = format!("bgdesk-{}-update-win64.exe", crate::update_source::UPDATE_EDITION);
+    let mut data = metadata();
+    data["artifacts"][0]["file_name"] = json!(name);
+    data["artifacts"][0]["url"] = json!(format!("{}/{name}", crate::update_source::UPDATE_ORIGIN));
+    let fixture = sign_fixture(data.clone(), KEY_ID);
+    let keys = [key(fixture.public_key)];
+    data["signature"] = serde_json::from_slice(&fixture.signature).unwrap();
+    let feed = serde_json::to_vec_pretty(&data).unwrap();
+    let verified = verify_latest_feed_with_keys(&feed, &keys).unwrap();
+    assert_eq!(verified.signed_bytes(), feed.as_slice());
+    assert_eq!(verified.version(), "1.4.6");
+    let artifact = verified.artifact(&query()).unwrap();
+    assert_eq!(artifact.sha256, SHA256);
+    assert_eq!(artifact.size, 123456);
+    assert!(verified.artifact(&UpdateArtifactQuery { arch: "x86", ..query() }).is_err());
+    for field in ["version", "package_id"] {
+        let mut tampered = data.clone();
+        tampered[field] = json!("changed");
+        assert!(verify_latest_feed_with_keys(&serde_json::to_vec(&tampered).unwrap(), &keys).is_err());
+    }
+    data["artifacts"][0]["sha256"] = json!("0".repeat(64));
+    assert!(verify_latest_feed_with_keys(&serde_json::to_vec(&data).unwrap(), &keys).is_err());
+}
+
+#[test]
+fn latest_feed_announces_only_newer_revisions_and_keeps_the_verified_snapshot() {
+    for (version, available) in [("65535.0.0", true), (crate::VERSION, false), ("1.0.0", false)] {
+        let mut data = metadata();
+        let name = format!("bgdesk-{}-update-win64.exe", crate::update_source::UPDATE_EDITION);
+        data["version"] = json!(version);
+        data["release_id"] = json!(format!("v{version}"));
+        data["artifacts"][0]["file_name"] = json!(name);
+        data["artifacts"][0]["url"] = json!(format!("{}/{name}", crate::update_source::UPDATE_ORIGIN));
+        let fixture = sign_fixture(data, KEY_ID);
+        let mut document: Value = serde_json::from_slice(&fixture.metadata).unwrap();
+        document["signature"] = serde_json::from_slice(&fixture.signature).unwrap();
+        let feed = verify_latest_feed_with_keys(&serde_json::to_vec(&document).unwrap(), &[key(fixture.public_key)]).unwrap();
+        crate::common::process_verified_software_update(feed).unwrap();
+        assert_eq!(!crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().is_empty(), available);
+        assert_eq!(crate::ui_interface::get_new_version(), if available { version } else { "" });
+        assert_eq!(crate::updater::latest_update_version(), if available { version } else { "" });
+        let selected = crate::updater::verified_update_artifact_for_release_page_url(
+            &crate::update_source::latest_url(), query());
+        assert_eq!(selected.is_ok(), available);
+        if let Ok(selected) = selected {
+            assert_eq!(selected.version, version);
+            assert_eq!(selected.sha256, SHA256);
+        }
+        assert!(crate::updater::verified_update_artifact_for_release_page_url(
+            "https://untrusted.example/latest.json", query()).is_err());
+    }
+}
+
+#[test]
+fn latest_feed_rejects_signed_wrong_edition_origin_paths_duplicates_and_invalid_revisions() {
+    let name = format!("bgdesk-{}-update-win64.exe", crate::update_source::UPDATE_EDITION);
+    let origin = crate::update_source::UPDATE_ORIGIN;
+    let mut original = metadata();
+    original["artifacts"][0]["file_name"] = json!(name);
+    original["artifacts"][0]["url"] = json!(format!("{origin}/{name}"));
+    let mut cases = Vec::new();
+    for url in [format!("https://untrusted.example/{name}"), format!("{origin}/nested/{name}"),
+                format!("{origin}/updates/suporte/v1.4.6/{name}"), format!("{origin}/{name}?x=1")] {
+        let mut data = original.clone();
+        data["artifacts"][0]["url"] = json!(url);
+        cases.push(data);
+    }
+    for (field, value) in [("package_id", json!("other-edition")), ("version", json!("1.5.1-rc1")),
+                           ("release_id", json!("v1.5.2")), ("artifacts", json!([]))] {
+        let mut data = original.clone();
+        data[field] = value;
+        cases.push(data);
+    }
+    let mut duplicate = original.clone();
+    duplicate["artifacts"].as_array_mut().unwrap().push(original["artifacts"][0].clone());
+    cases.push(duplicate);
+    for data in cases {
+        let fixture = sign_fixture(data, KEY_ID);
+        let mut feed: Value = serde_json::from_slice(&fixture.metadata).unwrap();
+        feed["signature"] = serde_json::from_slice(&fixture.signature).unwrap();
+        assert!(verify_latest_feed_with_keys(&serde_json::to_vec(&feed).unwrap(), &[key(fixture.public_key)]).is_err());
+    }
+}
+
+#[test]
 fn signed_root_downloads_keep_hash_identity_and_reject_other_origins_and_nested_paths() {
     let name = format!("bgdesk-{}-update-win64.exe", crate::update_source::UPDATE_EDITION);
     let origin = crate::update_source::UPDATE_ORIGIN;

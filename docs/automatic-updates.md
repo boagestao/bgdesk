@@ -1,243 +1,219 @@
-# Atualizações pelo bgdesk.com
+# Atualizações do BGDesk
 
-O aplicativo consulta por HTTPS, com `GET`, um arquivo estático do site:
+O aplicativo consulta por HTTPS um único arquivo assinado para sua edição:
 
-| Compilação | Arquivo consultado | Identidade assinada |
+| Edição | Feed padrão | Identidade assinada |
 | --- | --- | --- |
 | Cliente (`incoming-only`) | `https://bgdesk.com/updates/cliente/latest.json` | `bgdesk-cliente` |
-| Suporte (sem `incoming-only`) | `https://bgdesk.com/updates/suporte/latest.json` | `bgdesk-suporte` |
+| Suporte | `https://bgdesk.com/updates/suporte/latest.json` | `bgdesk-suporte` |
 
-O endereço antigo `https://bgdesk.boagestao.net/version/latest`, definido no
-submódulo de configuração, deixou de ser usado pelo atualizador deste aplicativo.
-Não há mais consulta ao GitHub para descobrir ou baixar atualizações.
+O build Actions define `BGDESK_UPDATE_ORIGIN` usando `R2_PUBLIC_ORIGIN`, normalmente
+`https://download.bgdesk.com`. Não há consulta ao GitHub para descobrir ou baixar
+atualizações. Clientes personalizados continuam fora do canal público.
 
-O workflow do GitHub Actions pode compilar outro domínio público do mesmo serviço
-usando `BGDESK_UPDATE_ORIGIN`, obtido de `R2_PUBLIC_ORIGIN`; no R2, o padrão é
-`https://download.bgdesk.com`. Consulte [github-actions.md](github-actions.md)
-para publicação automática, Secrets e os endereços efetivamente compilados.
+## Conteúdo do latest.json
 
-## O que identifica uma nova versão
-
-O `latest.json` aponta para uma release da mesma edição:
+Desde a revisão **1.5.1-3**, o próprio JSON contém a versão e todos os arquivos:
 
 ```json
-{"url":"https://bgdesk.com/updates/suporte/v1.5.1-1/"}
+{
+  "schema_version": 1,
+  "app": "rustdesk",
+  "package_id": "bgdesk-suporte",
+  "version": "1.5.1-3",
+  "release_id": "v1.5.1-3",
+  "published_at": "2026-10-23T12:00:00Z",
+  "signature_key_id": "2026-ed25519-main",
+  "artifacts": [
+    {
+      "platform": "windows",
+      "arch": "x86_64",
+      "format": "exe",
+      "file_name": "bgdesk-suporte-update-win64.exe",
+      "url": "https://download.bgdesk.com/bgdesk-suporte-update-win64.exe",
+      "size": 123456,
+      "sha256": "<SHA-256 do arquivo real>"
+    }
+  ],
+  "signature": {
+    "schema_version": 1,
+    "algorithm": "ed25519",
+    "key_id": "2026-ed25519-main",
+    "signature": "<assinatura base64>"
+  }
+}
 ```
 
-O aplicativo compara a versão canônica completa com a compilada em Cargo.
-Aceita `MAJOR.MINOR.PATCH` e `MAJOR.MINOR.PATCH-REVISAO`, com revisão numérica
-positiva, sem zeros à esquerda, até 65535. A ordem é
+O exemplo é ilustrativo; a publicação calcula tamanho, hash e assinatura reais.
+O identificador criptográfico `app: rustdesk` e o contexto de assinatura foram
+preservados. A assinatura cobre o documento inteiro sem a propriedade
+`signature`, em JSON UTF-8 compacto com chaves ordenadas recursivamente.
+
+O aplicativo verifica a assinatura antes de confiar na versão ou nos arquivos.
+Exige sua identidade de edição, versão/revisão válida, seletores únicos, nome,
+origem HTTPS autorizada, SHA-256 e tamanho. A seleção do pacote e o download usam
+a cópia verificada do mesmo feed; não há uma segunda busca por sidecars.
+Arquivos alterados ou incompatíveis são recusados antes da instalação.
+
+O comparador continua sendo o específico BGDesk:
 `1.5.1 < 1.5.1-1 < 1.5.1-2 < 1.5.1-10 < 1.5.2`.
-A pasta aceita prefixo `v` opcional; não usar `latest`, `nightly`, sufixos
-alfabéticos, `-0` nem quatro componentes na versão canônica.
-`{"url":""}` significa que nenhuma atualização está publicada.
+Cada componente cabe em u16; revisões são inteiros positivos sem zeros à esquerda.
+Não usar a ordenação SemVer para revisões BGDesk nem mudar a negociação de peers.
 
-**A migração inicial para 1.5.1-1 é manual.** O atualizador anterior rejeita URLs
-com sufixo. Depois dessa instalação, as revisões seguintes são detectadas
-automaticamente. Mudar apenas o contador Flutter não publica uma nova revisão.
-Consulte [o guia de revisões e integração upstream](unified-session-tabs.md)
-para os formatos nativos e os testes de migração.
+Por instrução do usuário, não há compatibilidade online com o feed antigo
+`{"url":".../v<versão>/"}`. Instale manualmente a primeira build com o formato
+novo. Pastas e metadados históricos existentes não são reescritos nem apagados.
 
-No preparo manual legado, dentro da pasta da release ficam os instaladores, `bgdesk-update.json`,
-`bgdesk-update.json.sig` e uma página de download `index.html`. O manifesto informa
-versão, edição, sistema, arquitetura, formato, URL, tamanho e SHA-256 de cada
-instalador. Sua assinatura Ed25519 é verificada antes de confiar nesses dados;
-o instalador também tem tamanho e hash verificados antes da instalação.
+## Publicação e arquivos no R2
 
-## Chave de assinatura
+`res/update/website_release.py prepare` gera pacotes na raiz do diretório público
+e somente `updates/<edição>/latest.json` para cada edição. Não cria pastas por
+versão, páginas `index.html` ou arquivos de assinatura separados para o feed.
+Cada pacote existe uma vez na raiz, compartilhado pelo site e pelo atualizador.
+O canal Android segue o mesmo formato em `updates/android/<edição>/latest.json`.
+Isso não implementa instalação automática no Android.
 
-A chave desta instalação foi criada em:
+Os nomes estáveis incluem `bgdesk-cliente-aarch64.dmg`,
+`bgdesk-suporte-update-win64.exe` (atualizador nativo) e
+`bgdesk-suporte-win64.exe` (Inno Setup). O feed distingue `exe`, `msi` e `inno-exe`;
+o Inno serve para instalação inicial, não como pacote de atualização nativo.
+Windows x86 distribui somente cliente. Os demais alvos têm cliente e suporte.
 
-```text
-~/.config/bgdesk/update-signing.json
-```
+O job valida o lote completo, envia e verifica todos os pacotes antes de ativar
+os feeds das duas edições. Pacotes e feeds usam `no-store, max-age=0`; o JSON usa
+`Content-Type: application/json`. Não aplicar fallback de SPA nesses endereços.
+Durante a troca dos pacotes, uma tentativa com o feed anterior pode falhar no
+hash; a tentativa seguinte deve consultar o feed atualizado.
 
-Ela tem permissão `0600`, contém a chave privada e **não deve ser enviada ao site
-nem incluída no Git**. Faça backup seguro: novas releases precisam ser assinadas
-com essa mesma chave para que os aplicativos já distribuídos as aceitem.
-A chave pública correspondente está em `src/update_metadata.rs`.
+A publicação registra a identidade concluída em `updates/releases/v<versão>.json`.
+Esse registro interno é imutável e não é consultado pelo aplicativo. A repetição
+da mesma versão exige os mesmos bytes; uma alteração funcional exige revisão
+superior. O histórico de binários fica no GitHub Releases. Reaproveitamento de
+builds por versão completa/alvo e preservação de commit/run continuam obrigatórios.
+Consulte [github-actions.md](github-actions.md).
 
-Em outra máquina de publicação, restaure esse arquivo e passe `--key-file` se
-usar outro caminho. O comando verifica se a chave privada corresponde à chave
-pública compilada no aplicativo. Não execute `init-key` novamente para releases
-normais; ele recusa substituir uma chave já configurada. Rotação exige planejar
-uma versão intermediária que confie na nova chave antes de usá-la.
+## Preparação local
 
-## Preparar uma release
-
-No repositório do aplicativo, prepare uma virtualenv de publicação (Python 3.10+):
-
-```sh
-python3 -m venv .tools/update-signing
-.tools/update-signing/bin/pip install 'cryptography==50.0.0'
-```
-
-Compile os instaladores com a nova versão. No macOS, use os DMGs finais assinados
-e notarizados, produzidos pelo fluxo descrito em [macos-signing.md](macos-signing.md).
-Não publique o DMG `-local`. No Windows, use os instaladores finais do build.
-Inclua apenas binários da edição indicada; o script não inspeciona o código interno
-do instalador para determinar se ele é cliente ou suporte.
-
-Exemplo para suporte, substituindo os caminhos pelos arquivos reais:
+Use a virtualenv de assinatura e a chave existente:
 
 ```sh
 .tools/update-signing/bin/python res/update/website_release.py prepare \
   --edition suporte \
-  --version 1.5.2 \
-  --site-public ../bgdesk-webpage/public \
-  --artifact macos aarch64 dmg build/macOS-aarch64-suporte/bgdesk-suporte-1.5.2-aarch64.dmg \
-  --artifact macos x86_64 dmg /caminho/bgdesk-suporte-1.5.2-x86_64.dmg \
-  --artifact windows x86_64 exe /caminho/bgdesk-suporte-1.5.2-win64.exe
+  --version 1.5.1-3 \
+  --site-public /caminho/site-public \
+  --artifact macos aarch64 dmg /caminho/bgdesk-suporte-aarch64.dmg \
+  --artifact windows x86_64 exe /caminho/bgdesk-suporte-update-win64.exe \
+  --artifact windows x86_64 inno-exe /caminho/bgdesk-suporte-win64.exe
 ```
 
-Execute novamente com `--edition cliente` e os instaladores cliente para publicar
-essa edição. Pode publicar as edições em versões diferentes. Cada combinação de
-sistema, arquitetura e formato deve ocorrer uma única vez. Arquiteturas aceitas:
-`aarch64` e `x86_64` no macOS; `x86`, `x86_64` e `aarch64` no Windows.
-Linux aceita `deb`, `rpm` e `AppImage` em `x86_64`/`aarch64` para download manual.
-O formato Windows `inno-exe` oferece o instalador inicial sem usá-lo como
-atualização; o formato `exe` deve conter o pacote nativo que aceita `--update`. Para instalações
-MSI, inclua também `--artifact windows x86_64 msi /caminho/instalador.msi`.
-Inclua todos os sistemas/arquiteturas que pretende atualizar: uma combinação
-ausente é recusada pelo cliente, sem tentar instalar um binário incompatível.
+Repita para cliente com os respectivos pacotes. A chave privada padrão fica em
+`~/.config/bgdesk/update-signing.json`, com permissão `0600`, fora do diretório
+público e do Git. O preparo confere sua correspondência com a chave pública
+compilada em `src/update_metadata.rs`. Não execute `init-key` para uma publicação
+normal nem imprima a chave. O preparo local não faz upload.
 
-O comando copia os instaladores, calcula hashes, assina e verifica tudo, cria
-`public/updates/<edição>/v<versão>/` e só depois troca o `latest.json` local.
-Releases existentes não são sobrescritas; para corrigir uma versão já publicada,
-gere uma versão maior. O script não faz upload nem deploy.
+## Comportamento e erros
 
-## Publicar no servidor
+A opção `enable-check-update` controla a consulta e o aviso. A instalação
+automática exige `allow-auto-update`, serviço/instalação compatível e ausência
+de sessões ativas. O serviço verifica após cerca de 30 segundos e depois a cada
+24 horas, com repetição em cerca de 30 minutos após falha ou sessão ativa.
+No Linux, o botão Atualizar baixa o pacote correto e instala pelo próprio
+aplicativo, com autorização gráfica quando necessária. Dispositivos móveis
+continuam usando download/gerenciador de pacotes.
 
-1. Envie a pasta completa `updates/<edição>/v<versão>/` para a raiz pública do
-   bgdesk.com. Preserve releases anteriores.
-2. Verifique que os instaladores e os dois arquivos de assinatura respondem com
-   HTTP 200 e os bytes originais. Não podem cair no HTML de fallback da SPA.
-3. Só então envie `updates/<edição>/latest.json`. Essa troca anuncia a versão.
+No Windows, ausência da chave de desinstalação ou do valor `WindowsInstaller`
+indica instalação por EXE, sem provocar `os error 2` ao selecionar o pacote.
+Permissões negadas e tipos inválidos no Registro continuam sendo reportados.
+Os botões dos diálogos de erro abrem **https://bgdesk.com**. O botão usa **Abrir o website** em pt-BR/pt-PT, **Open website** em inglês e
+**Abrir el sitio web** em espanhol, com traduções em todos os idiomas disponíveis.
 
-O build do site (`bun run prod`) copia `public/updates` para `dist/updates`.
-Os instaladores ficam ignorados pelo Git, mas precisam estar no diretório público
-da máquina que faz o build ou ser enviados diretamente ao servidor. Em deploys
-que substituem toda a raiz, restaure/preserve a árvore de releases para não apagar
-downloads em andamento ou releases antigas.
+O fluxo offline conserva `bgdesk-update.json` e `bgdesk-update.json.sig`, com
+verificação de assinatura, identidade, hash e tamanho. A mudança do feed online
+não altera os mapeamentos de pacotes nativos nem o formato de atualização offline.
 
-Sirva `latest.json` com `Content-Type: application/json` e
-`Cache-Control: no-store, max-age=0`; use HTTPS com certificado válido. O arquivo
-`public/_headers` configura isso em hosts compatíveis com esse formato
-([documentação do Netlify](https://docs.netlify.com/manage/routing/headers/)). Em Nginx,
-adapte ao `server` existente (a raiz já deve apontar para `dist`):
+Antes da distribuição, validar a troca real entre revisões nas duas edições de
+Windows/macOS, incluindo reinício do serviço, adiamento com sessão ativa e
+isolamento de clientes personalizados. Testes automatizados não substituem esse
+upgrade em cada plataforma.
 
-```nginx
-location ~ ^/updates/(cliente|suporte)/latest\.json$ {
-    default_type application/json;
-    add_header Cache-Control "no-store, max-age=0" always;
-    try_files $uri =404;
-}
-location /updates/ {
-    index index.html;
-    try_files $uri $uri/ =404;
-}
-```
+## Windows x86
 
-Não reescreva esses arquivos para `index.html` da aplicação React. Não regenere,
-reformate nem altere o manifesto após assiná-lo; a assinatura cobre seus bytes.
-Para pausar anúncios, publique `{"url":""}` no `latest.json` da edição.
+O Windows de 32 bits distribui somente cliente, com interface Sciter. O Setup
+Inno é `bgdesk-cliente-win32.exe`; o pacote nativo de atualização é
+`bgdesk-cliente-update-win32.exe`. O atualizador seleciona `windows/x86/exe` no
+feed assinado, sem confundir o Setup `inno-exe` ou o pacote x64.
 
-## Comportamento no aplicativo
+A detecção de MSI é compartilhada com x64: a ausência de `WindowsInstaller`
+significa instalação por EXE, sem provocar `os error 2`. A atualização automática
+roda no processo de serviço instalado, se habilitada e sem conexões ativas.
+O botão da interface Sciter abre `https://bgdesk.com`; ele não usa o diálogo de
+download/instalação do Flutter x64.
 
-O serviço verifica após cerca de 30 segundos e depois a cada 24 horas. Falhas são
-repetidas após cerca de 30 minutos. A opção de atualização automática precisa
-estar habilitada; o serviço evita instalar durante sessões remotas ativas.
-Windows instalado e macOS com serviço instalado usam a instalação automática
-existente. A interface também oferece o fluxo manual de atualização verificada.
-Linux e dispositivos móveis continuam dependendo dos downloads/gerenciadores de
-pacotes; este trabalho não acrescenta instalação automática nessas plataformas.
-Clientes personalizados continuam fora do canal público.
+O CI confere PE32 do app/runtime/atualizador, a versão retornada pelo aplicativo
+e a abertura da janela Sciter. Esses testes não executam uma instalação Inno
+completa nem um upgrade real entre revisões. Essa validação ainda precisa ocorrer
+em Windows; conferência de hashes, seletores e empacotamento não a substitui.
 
-As instalações já distribuídas precisam receber primeiro um build com este novo
-endereço e a chave pública. Publicar o site sozinho não altera o atualizador que
-já está instalado nas máquinas. Como a lista de chaves anterior estava vazia,
-essa primeira migração deve ser feita pelo instalador, manualmente ou por sua
-ferramenta de distribuição.
+## Atualizações Linux
 
-## Validação local
+O aviso de versão nova oferece **Atualizar** também no Linux. Depois da
+verificação do feed e do download, o aplicativo instala o formato correspondente
+à instalação em uso, sem exigir que o usuário abra um terminal:
 
-```sh
-.tools/update-signing/bin/python -m unittest discover -s res/update -p 'test_*metadata*.py'
-.tools/update-signing/bin/python -m unittest discover -s res/update -p 'test_website_release.py'
-cargo test --release --lib update_
-cargo test --release --lib --features incoming-only update_
-```
+- **Debian/Ubuntu (`.deb`):** APT instala o arquivo local e resolve dependências,
+  preservando arquivos de configuração existentes e recusando remoções.
+- **RPM (`.rpm`):** RPM atualiza o pacote local e mantém as verificações normais
+  de dependências e assinaturas do sistema.
+- **Arch (`.pkg.tar.zst`):** Pacman atualiza o pacote local sem pedir confirmação
+  no terminal. A política de assinaturas configurada no sistema é preservada.
+- **AppImage:** a nova versão substitui o arquivo do próprio usuário por uma
+  troca atômica, conservando a permissão de execução. Não há chamada root nem
+  solicitação de senha. Se o arquivo não pertencer ao usuário, não existir ou
+  não puder ser substituído, o aplicativo orienta o download pelo site.
 
-## Política do canal público BGDesk
+Para DEB/RPM/Arch, `pkexec --disable-internal-agent` solicita a autorização pelo
+agente gráfico Polkit da sessão. A senha de administrador é tratada pelo sistema;
+o BGDesk não a recebe nem a armazena. A dependência `pkexec`/`polkit` é declarada
+nos pacotes. A sessão gráfica precisa ter um agente de autenticação ativo.
+Não há fallback para um prompt textual ou para um terminal.
 
-O canal público é uma política distinta de `is_custom_client()`. Essa função
-legada compara o nome com RustDesk e continua sendo usada em personalização,
-preferências, staging do Windows e outros fluxos. Ela não deve decidir se uma
-distribuição pública BGDesk consulta as atualizações.
+O executável elevado precisa ser a instalação protegida em
+`/usr/share/bgdesk/bgdesk`. O formato é identificado pelo pacote que possui esse
+arquivo nas bases DPKG/RPM/Pacman; a distribuição, sozinha, não decide o formato.
+O helper valida novamente o `latest.json` assinado, a edição, a arquitetura e
+uma versão superior à compilada. Ele copia o pacote para uma pasta root privada
+e confere tamanho e SHA-256 dessa cópia antes de chamar o gerenciador. Os comandos
+usam argumentos separados, sem shell e sem desabilitar verificações de pacotes.
 
-`common::uses_public_update_channel()` permite o canal somente com o nome exato
-`BGDesk` e sem configuração personalizada assinada carregada. A configuração
-personalizada é marcada após verificar assinatura e JSON, mesmo quando mantém o
-nome BGDesk. Uma vez personalizada, a instância não entra no canal público.
-Configurar um servidor de conexão ou registrar uma licença BGDesk não transforma
-a distribuição pública em um cliente personalizado.
+A instalação é recusada enquanto houver sessões ativas ou seu estado não puder
+ser confirmado por IPC. O helper é iniciado com o subcomando `linux-update`,
+sem `--`, para sobreviver aos hooks que param processos `bgdesk --...` durante
+a atualização do serviço. O código de saída do instalador e a versão retornada
+pelo aplicativo instalado são conferidos antes de informar sucesso.
 
-A mesma política controla a consulta de versões, os avisos e ajustes Flutter,
-o cartão Sciter, o serviço macOS e a resolução de artefatos do feed público.
-O Windows já consultava diretamente o feed em segundo plano; a correção também
-protege esse caminho contra atualização de clientes personalizados pelo canal
-público. Os mecanismos próprios de personalização e licenciamento não mudam.
+Cancelar a autorização encerra a tentativa sem instalar. Erros de detecção,
+integridade, autorização ou instalação mostram uma mensagem traduzida orientando
+o download manual, com **Abrir o website** apontando para `https://bgdesk.com`.
+Depois do sucesso, uma mensagem pede para reiniciar o BGDesk e usar a nova versão.
 
-`enable-check-update` controla a consulta e o aviso na abertura. A instalação
-automática exige `allow-auto-update` efetivamente habilitado (`Y`), além de
-instalação/serviço compatível. A política pública não força essas preferências.
-No Linux o atualizador não instala pacotes automaticamente; use os downloads
-ou o gestor de pacotes. Cliente e suporte usam feeds e identidades de pacote
-separados; arquitetura e formato são selecionados no manifesto assinado.
+Este fluxo é interativo: é iniciado no aplicativo e usa autorização do usuário.
+O Linux não instala silenciosamente pelo serviço nem habilita uma política
+Polkit sem senha. Também não configura repositórios APT, DNF/YUM ou Pacman.
 
-### Migração e comprovação de upgrade
+Validação necessária em desktop Linux antes de distribuir: instalar e atualizar
+cada formato, confirmar o diálogo Polkit, testar cancelamento/negação e ausência
+do agente, sessão ativa, pacote alterado, AppImage sem permissão e reinício do
+serviço. Os testes de componentes não substituem essa validação gráfica.
 
-Publicar os pacotes e validar R2, assinatura Ed25519, SHA256 e tamanho comprova
-a distribuição. Isso não comprova que uma versão instalada consulta o feed e
-conclui a troca do aplicativo.
-
-Versões anteriores que pulam a consulta por classificarem BGDesk como custom
-precisam receber a primeira versão corrigida por instalação manual ou por uma
-ferramenta de distribuição administrada. Um feed novo não corrige esse bloqueio
-no binário antigo. No Windows o caminho automático em segundo plano não tinha
-esse mesmo bloqueio, mas ainda depende da opção e do serviço efetivos.
-
-Antes de considerar a atualização automática validada, executar em instalações
-descartáveis das duas edições: instalar uma versão com a política corrigida,
-habilitar as opções desejadas, disponibilizar uma versão superior assinada e
-confirmar consulta, seleção da edição/arquitetura, download verificado, troca,
-reinício do serviço e versão final. Repetir com uma conexão ativa para confirmar
-adiamento e com configuração personalizada para confirmar isolamento. A migração
-da versão antiga deve ser testada separadamente. Registrar versões de origem e
-destino e os logs; testes de política não substituem esse upgrade real.
-
-## Um pacote por alvo na raiz do R2
-
-A publicação Actions usa `website_release.py prepare --root-artifacts`.
-Os manifestos continuam versionados e assinados, mas a URL de cada pacote aponta
-para o arquivo da raiz já usado pelo site, por exemplo
-`https://download.bgdesk.com/bgdesk-cliente-aarch64.dmg` ou
-`https://download.bgdesk.com/bgdesk-suporte-update-win64.exe`. Não são criadas
-cópias de instaladores dentro de `updates/<edição>/v<versão>/` nas novas publicações.
-O histórico de binários continua no GitHub Releases.
-
-O aplicativo aceita a raiz do mesmo domínio HTTPS ou os caminhos antigos de
-release. Exige manifesto assinado da própria edição, versão, arquitetura,
-formato, tamanho e SHA-256; não baixa um arquivo arbitrário só porque está na raiz.
-Os pacotes da raiz usam `no-store`, enquanto os metadados assinados por versão
-são imutáveis. Durante uma substituição, um manifesto anterior pode encontrar
-bytes da versão seguinte: a diferença de hash impede a instalação e a tentativa
-seguinte deve consultar o feed atualizado. A publicação só anuncia o novo feed
-depois de conferir todos os pacotes e metadados.
-
-Os binários 1.5.1 ainda esperam URLs dentro da pasta de release; mesmo o caminho
-automático Windows que já consultava o feed precisa receber primeiro um build
-compatível com URLs da raiz por instalação manual ou distribuição administrada.
-Não reescrever os manifestos assinados da 1.5.1 para simular compatibilidade.
-As cópias antigas dessa versão ficam preservadas durante a transição; limpeza
-remota deve ocorrer somente depois de validar o novo deploy e a migração.
+Verificação local desta implementação: 154 testes Flutter passaram (um caso de
+navegador pulado), e a análise dos arquivos Flutter alterados não encontrou erros
+nem avisos, somente sete informações de depreciação já existentes. Os testes
+Rust passaram em macOS nas duas edições (42 por edição), incluindo assinatura
+do feed, seleção do pacote e substituição do AppImage. O preflight passou:
+14 testes de metadados, sete de publicação do site, 102 de CI (cinco pulados)
+e 91 verificações de caminhos Linux.
+Em contêiner Linux, 13 testes de componentes passaram para cada edição, como
+root e como UID 1000; esse ambiente usa substitutos para IPC e carregamento do
+feed e não executa a instalação real nem o diálogo Polkit. As traduções de erro,
+sucesso e do botão do website estão preenchidas nos 53 idiomas disponíveis.

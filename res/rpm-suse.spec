@@ -3,6 +3,7 @@ Version:    1.1.9
 Release:    0
 Summary:    BGDesk with unattended Wayland and X11 access
 License:    GPL-3.0
+Requires:   polkit
 Requires:   gtk3 libxcb1 libXfixes3 alsa-utils libXtst6 libva2 gstreamer-plugins-base gstreamer-plugin-pipewire
 Requires:   libdrm2 >= 2.4.101, libEGL.so.1()(64bit), libGLESv2.so.2()(64bit)
 Recommends: libayatana-appindicator3-1 xdotool

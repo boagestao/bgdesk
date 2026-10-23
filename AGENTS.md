@@ -2,9 +2,9 @@
 
 ## Versão do aplicativo
 
-- A base do BGDesk acompanha o RustDesk upstream: atualmente **1.5.1**. Por instrução explícita do usuário, revisões funcionais BGDesk usam sufixo numérico: **1.5.1-1**, depois `1.5.1-2`, sem mudar a base.
+- A base do BGDesk acompanha o RustDesk upstream: atualmente **1.5.1**. Por instrução explícita do usuário, revisões funcionais BGDesk usam sufixo numérico: **1.5.1-1**, depois `1.5.1-2`, `1.5.1-3`, sem mudar a base.
 - Não incremente a versão apenas para empacotamento, inclusão de plataformas ou nova tentativa de publicação. Mudanças funcionais podem incrementar a revisão numérica autorizada; a base só muda ao sincronizar o RustDesk, ou por instrução explícita do usuário.
-- Mantenha `Cargo.toml`, `flutter/pubspec.yaml`, `libs/portable/Cargo.toml` e os respectivos `Cargo.lock` coerentes. O estado atual do Flutter é `1.5.1-2+70`.
+- Mantenha `Cargo.toml`, `flutter/pubspec.yaml`, `libs/portable/Cargo.toml` e os respectivos `Cargo.lock` coerentes. O estado atual do Flutter é `1.5.1-3+71`.
 - Sempre que a versão do aplicativo mudar, ajuste **tudo** que o build e o preflight leem ou conferem nessa revisão, no mesmo commit. Não deixe um manifesto novo com testes, empacotadores ou docs de estado atual ainda na revisão anterior. O `release.yml` falha em "Validate release tools" se isso ficar para trás.
 - No bump: `Cargo.toml`, `Cargo.lock`, `libs/portable/Cargo.toml`, `libs/portable/Cargo.lock`, `flutter/pubspec.yaml` (revisão e `+N` do build), este `AGENTS.md` e `UPSTREAM.md`. Incremente o identificador de build do Flutter junto com a revisão (`+69` → `+70`).
 - Procure a revisão anterior no repositório e atualize asserts, scripts e textos que descrevem a versão **atual**. Fixtures que usam uma revisão antiga de propósito (exemplo de comparador, tag histórica) permanecem. Prefira ler `Cargo.toml` em vez de literal, quando o teste deve acompanhar a revisão vigente.
@@ -23,7 +23,8 @@
 - Não duplique dispatch quando o push já dispara o workflow. Não cancele execuções sem instrução do usuário.
 - Nas releases públicas Windows publique somente os Setups Inno cliente x86, cliente x64 e suporte x64. Não compilar nem publicar novos pacotes de suporte x86. Preserve os pacotes nativos de atualização nos artefatos internos e no R2 para o aplicativo.
 - Reaproveitar builds NÃO permite pular a publicação estável. Mesmo com a versão já publicada, confira e complete os Setups de cliente x86/x64 e suporte x64, preservando releases históricas existentes. Preserve o tag e os bytes existentes; envie os pacotes ausentes e remova apenas os atualizadores nativos já identificados e verificados dos downloads públicos Windows. A imutabilidade dos metadados R2 continua separada dessa sincronização GitHub.
-- No R2, os pacotes devem ficar uma única vez na raiz, compartilhados pelo site e atualizador; diretórios de versão contêm somente metadados. Preserve validação de assinatura, hashes e tamanho.
+- No R2, os pacotes devem ficar uma única vez na raiz, compartilhados pelo site e atualizador. O `latest.json` de cada edição contém versão, arquivos e assinatura; não criar novas pastas de versão nem páginas `index.html` para atualizações. Preserve assinatura, hashes, tamanho e a identidade das publicações já concluídas. Erros abrem `https://bgdesk.com`.
+- No Linux, atualizações DEB/RPM/Arch usam autorização gráfica Polkit; AppImage não usa root. O helper elevado revalida o feed assinado e a cópia privada do pacote antes de instalar. Preserve a checagem de sessões, os erros traduzidos e o acesso ao website; não capture senhas no aplicativo nem abra terminal.
 - Preserve alterações locais e nunca imprima `.env`, credenciais ou certificados privados.
 
 ## Abas e sincronização upstream

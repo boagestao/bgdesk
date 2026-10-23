@@ -36,20 +36,26 @@ def prepare(s3, bucket, records, version, origin, stage, key, source_commit='HEA
         if r2.file_hash(target) != record['sha256'] or target.stat().st_size != record['size']:
             raise ValueError('Android artifact changed before publication')
         base = f'updates/android/{edition}'
-        prefix = f'{base}/v{version}'
         data, signature = directory / 'bgdesk-update.json', directory / 'bgdesk-update.json.sig'
+        latest = directory / 'latest.json'
         common = dict(version=version, release_id=f'v{version}', package_id=f'bgdesk-{edition}',
                       release_base_url=f'{origin}/{base}', artifact_base_url=origin)
-        exists = [r2.head(s3, bucket, f'{prefix}/{p.name}') is not None for p in (data, signature)]
-        if any(exists) and not all(exists):
-            raise ValueError('Incomplete existing Android metadata; refusing to replace signed bytes')
-        if all(exists):
-            for local in (data, signature):
-                local.write_bytes(s3.get_object(Bucket=bucket, Key=f'{prefix}/{local.name}')['Body'].read())
-        else:
+        remote_key = f'{base}/latest.json'
+        if r2.head(s3, bucket, remote_key):
+            raw = s3.get_object(Bucket=bucket, Key=remote_key)['Body'].read()
+            previous = json.loads(raw)
+            previous_version = previous.get('version')
+            if previous_version and r2.parse_version(previous_version) > r2.parse_version(version):
+                raise ValueError('Refusing to roll back Android latest feed')
+            if previous_version == version:
+                original, original_signature = metadata.read_latest(raw)
+                data.write_bytes(original)
+                signature.write_bytes(metadata.stable_json(original_signature))
+        if not data.exists():
             metadata.command_sign(argparse.Namespace(**common, artifact=[('android', 'universal', 'apk', str(target))],
                                   published_at=stamp, metadata_out=str(data), signature_out=str(signature)))
         metadata.command_verify(argparse.Namespace(**common, artifact=[str(target)], metadata=str(data), signature=str(signature)))
+        latest.write_bytes(metadata.latest_bytes(data.read_bytes(), signature.read_bytes()))
         document = json.loads(data.read_bytes())
         artifacts = document['artifacts']
         if len(artifacts) != 1 or any(artifacts[0].get(k) != v for k, v in dict(
@@ -57,7 +63,7 @@ def prepare(s3, bucket, records, version, origin, stage, key, source_commit='HEA
                 url=f'{origin}/{name}', size=record['size'], sha256=record['sha256']).items()):
             raise ValueError('Existing Android metadata differs from the supplied APK')
         packages.append((name, target))
-        sidecars += [(f'{prefix}/{p.name}', p) for p in (data, signature)]
+        sidecars.append((remote_key, latest))
     return packages, sidecars
 
 
@@ -83,16 +89,10 @@ def main():
             r2.upload(s3, bucket, path, name, immutable=False)
         for name, path in packages:
             r2.public_check(origin, name, path, small=True)
+        # One signed JSON per edition, activated after both root APKs are verified.
         for name, path in sidecars:
-            r2.upload(s3, bucket, path, name)
+            r2.upload(s3, bucket, path, name, immutable=False, metadata={'application-version': args.version})
             r2.public_check(origin, name, path, small=True)
-        # Activate only after both packages and all signed sidecars were verified.
-        for edition in ('cliente', 'suporte'):
-            latest = stage / edition / 'latest.json'
-            latest.write_text(json.dumps({'url': f'{origin}/updates/android/{edition}/v{args.version}/'}) + '\n')
-            name = f'updates/android/{edition}/latest.json'
-            r2.upload(s3, bucket, latest, name, immutable=False)
-            r2.public_check(origin, name, latest, small=True)
 
 
 if __name__ == '__main__':

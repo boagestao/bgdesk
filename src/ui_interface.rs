@@ -753,14 +753,11 @@ pub fn current_is_wayland() -> bool {
 
 #[inline]
 pub fn get_new_version() -> String {
-    SOFTWARE_UPDATE_URL
-        .lock()
-        .unwrap()
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .to_owned()
+    if SOFTWARE_UPDATE_URL.lock().unwrap().is_empty() {
+        String::new()
+    } else {
+        crate::updater::latest_update_version()
+    }
 }
 
 #[inline]

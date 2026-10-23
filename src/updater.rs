@@ -3,7 +3,10 @@ mod download;
 
 use crate::common::do_check_software_update;
 use artifact::verified_update_artifact_from_release_page_url;
-pub(crate) use artifact::{current_update_arch, current_update_format, current_update_platform};
+pub(crate) use artifact::{
+    cache_update_feed, clear_update_feed, current_update_arch, current_update_format,
+    current_update_platform, latest_update_version,
+};
 pub use artifact::{
     current_update_artifact_query, get_update_download_file_from_url,
     verified_update_artifact_for_download_url, verified_update_artifact_for_release_page_url,
@@ -11,6 +14,8 @@ pub use artifact::{
 use base::config::keys;
 use download::ensure_verified_update_artifact;
 pub(crate) use download::remove_update_file;
+#[cfg(target_os = "linux")]
+pub(crate) use artifact::verified_update_feed_for_download_url;
 use hbb_common::{bail, config, log, ResultType};
 use std::{
     path::Path,

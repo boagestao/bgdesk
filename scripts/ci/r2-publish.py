@@ -117,58 +117,48 @@ def public_check(origin, key, path, small=False):
             raise ValueError(f"Public download URL has the wrong size: {key}")
 
 
-def publish(s3, bucket, site, records, origin, release_id, verify=public_check, root_artifacts=False):
-    # Never activate an edition while another edition still has missing objects.
-    if root_artifacts:
-        packages = []
-        for record, _ in records:
-            name = root_artifact_name(record['edition'], record['platform'], record['arch'], record['format'])
-            path = site / 'updates' / record['edition'] / release_id / name
-            if file_hash(path) != record['sha256'] or path.stat().st_size != record['size']:
-                raise ValueError(f'Root package differs from the build artifact: {name}')
-            packages.append((name, path))
-        for key, path in packages:
-            upload(s3, bucket, path, key, immutable=False)
-        for key, path in packages:
-            verify(origin, key, path)
-    release_files = []
+def publish(s3, bucket, site, records, origin, release_id, verify=public_check):
+    # Check the complete batch, including signed feeds, before any remote mutation.
+    feeds = []
     for edition in ("cliente", "suporte"):
-        directory = site / "updates" / edition / release_id
-        for path in sorted(directory.iterdir()):
-            if root_artifacts and path.name not in {'bgdesk-update.json', 'bgdesk-update.json.sig', 'index.html'}:
-                continue  # Packages are stored once, at the root, shared with website downloads.
-            if not path.is_file():
-                raise ValueError("Release must contain only regular files")
-            key = path.relative_to(site).as_posix()
-            upload(s3, bucket, path, key)
-            release_files.append((key, path))
-    for key, path in release_files:
-        verify(origin, key, path, small=path.name in {"bgdesk-update.json", "bgdesk-update.json.sig", "index.html"})
-    # Preserve the existing site's stable Windows/Linux download links.
+        latest = site / "updates" / edition / "latest.json"
+        document = json.loads(latest.read_bytes())
+        if document.get('release_id') != release_id or not document.get('signature'):
+            raise ValueError('Invalid signed latest feed')
+        key = latest.relative_to(site).as_posix()
+        check_latest_replacement(s3, bucket, key, latest, document['version'])
+        feeds.append((key, latest, document['version']))
+    packages = []
     for record, _ in records:
-        if root_artifacts:
-            break
-        fmt, edition, arch = record["format"], record["edition"], record["arch"]
-        aliases = []
-        if record["platform"] == "linux":
-            aliases.append(f"bgdesk-{edition}-{arch}.{fmt}")
-        elif fmt == "inno-exe":
-            aliases.append(f"bgdesk-{edition}-win64.exe")
-        elif fmt == "dmg":
-            aliases.append(f"bgdesk-{edition}-{arch}.dmg")
-        path = site / "updates" / edition / release_id / record["file_name"]
-        for alias in aliases:
-            upload(s3, bucket, path, alias, immutable=False)
+        name = root_artifact_name(record['edition'], record['platform'], record['arch'], record['format'])
+        path = site / name
+        if file_hash(path) != record['sha256'] or path.stat().st_size != record['size']:
+            raise ValueError(f'Root package differs from the build artifact: {name}')
+        packages.append((name, path))
+    for key, path in packages:
+        upload(s3, bucket, path, key, immutable=False)
+    for key, path in packages:
+        verify(origin, key, path)
     for source_name, public_name in (("install.sh", "install-suporte.sh"), ("install-client.sh", "install.sh")):
         script = site / public_name
         script.write_text((ROOT / "installers" / source_name).read_text().replace(
             "https://download.bgdesk.com", origin))
         upload(s3, bucket, script, public_name, immutable=False)
-    for edition in ("cliente", "suporte"):
-        latest = site / "updates" / edition / "latest.json"
-        key = latest.relative_to(site).as_posix()
-        upload(s3, bucket, latest, key, immutable=False)
+    for key, latest, version in feeds:
+        upload(s3, bucket, latest, key, immutable=False, metadata={'application-version': version})
         verify(origin, key, latest, small=True)
+
+
+def check_latest_replacement(s3, bucket, key, latest, version):
+    previous = head(s3, bucket, key)
+    if not previous:
+        return
+    old_version = previous.get('Metadata', {}).get('application-version')
+    if old_version and parse_version(old_version) > parse_version(version):
+        raise ValueError(f'Refusing to roll back latest feed: {key}')
+    if old_version == version and previous.get('Metadata', {}).get('sha256') != file_hash(latest):
+        raise ValueError(f'Signed feed already exists with different bytes for this version: {key}')
+
 
 
 def main():
@@ -216,13 +206,13 @@ def main():
             command = [sys.executable, str(ROOT / "res/update/website_release.py"), "prepare",
                        "--version", args.version, "--edition", edition,
                        "--published-at", published_at,
-                       "--site-public", str(site), "--key-file", str(private_key), "--root-artifacts"]
+                       "--site-public", str(site), "--key-file", str(private_key)]
             for record, path in records:
                 if record["edition"] == edition:
                     command += ["--artifact", record["platform"], record["arch"], record["format"], str(path)]
             environment = dict(os.environ, BGDESK_UPDATE_ORIGIN=origin)
             subprocess.run(command, cwd=ROOT, env=environment, check=True)
-        publish(s3, bucket, site, records, origin, release_id, root_artifacts=True)
+        publish(s3, bucket, site, records, origin, release_id)
         completion = Path(temp) / "release.json"
         completion.write_text(json.dumps({"version": args.version, "commit": source_commit, "artifact_layout": "root"}))
         upload(s3, bucket, completion, marker, metadata={'artifact-layout': 'root'})

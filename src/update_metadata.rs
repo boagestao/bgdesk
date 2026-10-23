@@ -41,7 +41,7 @@ const TRUSTED_UPDATE_KEYS: &[TrustedUpdateKey] = &[TrustedUpdateKey {
     ],
 }];
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct UpdateMetadata {
     schema_version: u32,
     app: String,
@@ -54,7 +54,7 @@ struct UpdateMetadata {
     artifacts: Vec<UpdateArtifact>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct UpdateArtifact {
     platform: String,
     arch: String,
@@ -109,6 +109,129 @@ struct VerificationOptions<'a> {
     expected_package_id: &'a str,
     artifact_url_policy: ArtifactUrlPolicy<'a>,
     trusted_keys: &'a [TrustedUpdateKey],
+}
+
+#[derive(Clone)]
+pub(crate) struct VerifiedUpdateFeed {
+    metadata: UpdateMetadata,
+    signed_bytes: Vec<u8>,
+}
+
+impl VerifiedUpdateFeed {
+    pub(crate) fn signed_bytes(&self) -> &[u8] {
+        &self.signed_bytes
+    }
+    pub(crate) fn version(&self) -> &str {
+        &self.metadata.version
+    }
+
+    pub(crate) fn artifact(
+        &self,
+        query: &UpdateArtifactQuery<'_>,
+    ) -> ResultType<VerifiedUpdateArtifact> {
+        let artifact = select_artifact(&self.metadata, query)?;
+        Ok(VerifiedUpdateArtifact {
+            version: self.metadata.version.clone(),
+            url: artifact.url.clone(),
+            #[cfg(target_os = "macos")]
+            file_name: artifact.file_name.clone(),
+            size: artifact.size,
+            sha256: artifact.sha256.clone(),
+        })
+    }
+}
+
+pub(crate) fn verify_latest_feed(bytes: &[u8]) -> ResultType<VerifiedUpdateFeed> {
+    verify_latest_feed_with_keys(bytes, TRUSTED_UPDATE_KEYS)
+}
+
+fn verify_latest_feed_with_keys(
+    bytes: &[u8],
+    keys: &[TrustedUpdateKey],
+) -> ResultType<VerifiedUpdateFeed> {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(bytes).context("invalid latest.json")?;
+    let signature = document
+        .as_object_mut()
+        .and_then(|object| object.remove("signature"))
+        .ok_or_else(|| anyhow!("latest.json is missing its signature"))?;
+    let signature: UpdateSignature =
+        serde_json::from_value(signature).context("invalid latest signature")?;
+    validate_signature_schema(&signature)?;
+    let key = keys
+        .iter()
+        .find(|key| key.key_id == signature.key_id && key.algorithm == signature.algorithm)
+        .ok_or_else(|| anyhow!("unsupported update signature key"))?;
+    // Publication signs compact UTF-8 JSON with recursively sorted object keys.
+    // Whitespace and property order in the delivered file do not affect verification.
+    let canonical = canonical_latest_json(&document)?;
+    verify_metadata_signature(&canonical, &decode_signature(&signature.signature)?, key)?;
+    let metadata: UpdateMetadata = serde_json::from_value(document)?;
+    crate::update_source::parse_update_version(&metadata.version)?;
+    if crate::update_source::display_version_from_release_id(&metadata.release_id)?
+        != metadata.version
+    {
+        return Err(anyhow!("update metadata release id mismatch"));
+    }
+    let root = format!("{}/", crate::update_source::UPDATE_ORIGIN);
+    let options = VerificationOptions {
+        requirements: MetadataRequirements {
+            expected_version: &metadata.version,
+            expected_release_id: &metadata.release_id,
+            artifact: UpdateArtifactQuery {
+                platform: "",
+                arch: "",
+                format: "",
+            },
+        },
+        expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+        artifact_url_policy: ArtifactUrlPolicy::ExactPrefix(&root),
+        trusted_keys: keys,
+    };
+    validate_metadata(&metadata, &signature, &options)?;
+    if metadata.artifacts.is_empty() {
+        return Err(anyhow!("latest.json contains no update artifacts"));
+    }
+    let mut selectors = std::collections::BTreeSet::new();
+    let mut names = std::collections::BTreeSet::new();
+    for artifact in &metadata.artifacts {
+        validate_artifact(artifact, options.artifact_url_policy)?;
+        if artifact.size == 0
+            || crate::update_source::download_file_name(&artifact.url)
+                != Some(artifact.file_name.as_str())
+            || !selectors.insert((&artifact.platform, &artifact.arch, &artifact.format))
+            || !names.insert(&artifact.file_name)
+        {
+            return Err(anyhow!("invalid or duplicate latest update artifact"));
+        }
+    }
+    Ok(VerifiedUpdateFeed {
+        metadata,
+        signed_bytes: bytes.to_vec(),
+    })
+}
+
+fn canonical_latest_json(value: &serde_json::Value) -> ResultType<Vec<u8>> {
+    use serde::Serialize;
+    struct Canonical<'a>(&'a serde_json::Value);
+    impl Serialize for Canonical<'_> {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            match self.0 {
+                serde_json::Value::Object(object) => object
+                    .iter()
+                    .map(|(key, value)| (key, Canonical(value)))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+                    .serialize(serializer),
+                serde_json::Value::Array(array) => array
+                    .iter()
+                    .map(Canonical)
+                    .collect::<Vec<_>>()
+                    .serialize(serializer),
+                value => value.serialize(serializer),
+            }
+        }
+    }
+    Ok(serde_json::to_vec(&Canonical(value))?)
 }
 
 #[derive(Clone, Copy)]

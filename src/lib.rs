@@ -33,6 +33,8 @@ pub(crate) mod update_metadata;
 pub(crate) mod update_hash;
 pub(crate) mod update_source;
 pub(crate) mod update_policy;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+pub(crate) mod linux_update;
 #[cfg(target_os = "macos")]
 mod manual_update;
 mod version;

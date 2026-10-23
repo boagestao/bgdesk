@@ -8,6 +8,15 @@ use winreg::{enums::*, RegKey};
 const REG_NAME_DISPLAY_NAME: &str = "DisplayName";
 const UNINSTALL_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
 
+pub(super) fn is_msi_installed(install_key: std::io::Result<RegKey>) -> std::io::Result<bool> {
+    match install_key.and_then(|key| key.get_value::<u32, _>(REG_NAME_WINDOWS_INSTALLER)) {
+        Ok(value) => Ok(value == MSI_WINDOWS_INSTALLER_VALUE),
+        // EXE/Inno installations need not have an MSI marker or uninstall key.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 pub(super) fn find_product_code(app_name: &str) -> ResultType<Option<String>> {
     let product_codes = find_product_codes_in_view(app_name, false)?
         .into_iter()
@@ -92,5 +101,34 @@ pub(super) fn is_matching_entry(
         Err(err) => bail!(
             "Failed to read {REG_NAME_DISPLAY_NAME} from MSI uninstall entry {key_name}: {err}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_detection_accepts_exe_installations_and_preserves_registry_errors() {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let path = format!("Software\\BGDesk-MSI-test-{}", uuid::Uuid::new_v4());
+        assert!(!is_msi_installed(hkcu.open_subkey(&path)).unwrap());
+        let (key, _) = hkcu.create_subkey(&path).unwrap();
+        assert!(!is_msi_installed(hkcu.open_subkey(&path)).unwrap());
+        key.set_value(REG_NAME_WINDOWS_INSTALLER, &MSI_WINDOWS_INSTALLER_VALUE)
+            .unwrap();
+        assert!(is_msi_installed(hkcu.open_subkey(&path)).unwrap());
+        key.set_value(REG_NAME_WINDOWS_INSTALLER, &0u32).unwrap();
+        assert!(!is_msi_installed(hkcu.open_subkey(&path)).unwrap());
+        key.set_value(REG_NAME_WINDOWS_INSTALLER, &"invalid")
+            .unwrap();
+        assert!(is_msi_installed(hkcu.open_subkey(&path)).is_err());
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            is_msi_installed(Err(denied)).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        drop(key);
+        hkcu.delete_subkey_all(path).unwrap();
     }
 }

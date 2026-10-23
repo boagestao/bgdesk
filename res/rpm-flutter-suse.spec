@@ -5,6 +5,7 @@ Summary:    BGDesk with unattended Wayland and X11 access
 License:    GPL-3.0
 URL:        https://boagestao.com.br
 Vendor:     bgdesk <contato@boagestao.com.br>
+Requires:   polkit
 Requires:   gtk3 libxcb1 libXfixes3 alsa-utils libXtst6 libva2 gstreamer-plugins-base gstreamer-plugin-pipewire
 Requires:   libdrm2 >= 2.4.101, libEGL.so.1()(64bit), libGLESv2.so.2()(64bit)
 Recommends: libayatana-appindicator3-1 xdotool

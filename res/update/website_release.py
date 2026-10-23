@@ -3,7 +3,6 @@
 import argparse
 import base64
 from datetime import datetime, timezone
-import html
 import json
 import os
 from pathlib import Path
@@ -78,22 +77,6 @@ def validate_version(version, release_id):
         metadata.fail("release id must equal version, optionally prefixed by v")
 
 
-def release_page(version, edition, artifacts):
-    links = "\n".join(
-        f'<li><a href="{html.escape(item["url"], quote=True)}">'
-        f'{html.escape(item["platform"])} / {html.escape(item["arch"])} '
-        f'({html.escape(item["format"])})</a></li>'
-        for item in artifacts if item['platform'] != 'windows' or item['format'] == 'inno-exe'
-    )
-    return (
-        '<!doctype html><html lang="pt-BR"><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>BGDesk {edition} {version}</title>'
-        f'<h1>BGDesk {edition} — {version}</h1><ul>{links}</ul>'
-        '<p><a href="https://bgdesk.com">Voltar ao site</a></p></html>\n'
-    )
-
-
 def prepare_release(args):
     release_id = args.release_id or f"v{args.version}"
     validate_version(args.version, release_id)
@@ -104,13 +87,15 @@ def prepare_release(args):
     load_key(key_file)
     metadata.command_check_key(argparse.Namespace(rust_source=args.rust_source))
     channel = public / "updates" / args.edition
-    destination = channel / release_id
-    if destination.exists():
-        metadata.fail("release already exists; publish a new version instead of replacing it")
+    latest_path = channel / "latest.json"
+    if latest_path.exists():
+        previous = json.loads(latest_path.read_bytes())
+        previous_version = previous.get('version')
+        if previous_version and parse_version(previous_version) >= parse_version(args.version):
+            metadata.fail("release already exists or is older; publish a new version instead of replacing it")
     channel.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".release-", dir=channel) as temporary:
-        stage = Path(temporary) / release_id
-        stage.mkdir()
+        stage = Path(temporary)
         specs = []
         for platform, arch, file_format, raw_path in args.artifact:
             valid_selector = (
@@ -131,7 +116,7 @@ def prepare_release(args):
             metadata.validate_or_fail(metadata.validate_artifact_file_name, path.name)
             if path.name in {"bgdesk-update.json", "bgdesk-update.json.sig", "index.html"}:
                 metadata.fail("artifact name conflicts with release metadata")
-            name = root_artifact_name(args.edition, platform, arch, file_format) if args.root_artifacts else path.name
+            name = root_artifact_name(args.edition, platform, arch, file_format)
             target = stage / name
             if target.exists():
                 metadata.fail("duplicate artifact file name")
@@ -141,7 +126,7 @@ def prepare_release(args):
         common = dict(
             version=args.version, release_id=release_id,
             package_id=f"bgdesk-{args.edition}", release_base_url=base_url,
-            artifact_base_url=ORIGIN if args.root_artifacts else None,
+            artifact_base_url=ORIGIN,
         )
         metadata_path = stage / "bgdesk-update.json"
         signature_path = stage / "bgdesk-update.json.sig"
@@ -154,18 +139,19 @@ def prepare_release(args):
             **common, artifact=[spec[3] for spec in specs],
             metadata=str(metadata_path), signature=str(signature_path),
         ))
-        artifacts = json.loads(metadata_path.read_bytes())["artifacts"]
-        (stage / "index.html").write_text(release_page(args.version, args.edition, artifacts))
-        stage.rename(destination)
-    # Activate only after every artifact and both signed sidecars are complete.
-    with tempfile.NamedTemporaryFile(mode="w", dir=channel, delete=False) as handle:
-        json.dump({"url": f"{base_url}/{release_id}/"}, handle)
-        handle.write("\n")
-        latest = Path(handle.name)
-    latest.chmod(0o644)
-    latest.replace(channel / "latest.json")
-    print(f"Release verificada: {destination}")
-    print(f"Publicar a pasta da release antes de {channel / 'latest.json'}")
+        latest = stage / "latest.json"
+        latest.write_bytes(metadata.latest_bytes(metadata_path.read_bytes(), signature_path.read_bytes()))
+        metadata.command_verify_latest(argparse.Namespace(
+            **common, artifact=[spec[3] for spec in specs], metadata=str(latest),
+        ))
+        # Packages are shared with website downloads and always live at the root.
+        for spec in specs:
+            source = Path(spec[3])
+            source.replace(public / source.name)
+        latest.chmod(0o644)
+        latest.replace(latest_path)
+    print(f"Feed assinado verificado: {latest_path}")
+
 
 
 def parser():
@@ -181,8 +167,6 @@ def parser():
     prepare.add_argument("--version", required=True)
     prepare.add_argument("--release-id")
     prepare.add_argument("--published-at", help="fixed RFC 3339 timestamp for reproducible CI retries")
-    prepare.add_argument("--root-artifacts", action="store_true",
-                         help="sign URLs for the existing root downloads, without versioned package copies in R2")
     prepare.add_argument("--artifact", action="append", nargs=4, required=True,
                          metavar=("PLATFORM", "ARCH", "FORMAT", "PATH"))
     prepare.add_argument("--site-public", default=str(ROOT.parent / "bgdesk-webpage/public"))

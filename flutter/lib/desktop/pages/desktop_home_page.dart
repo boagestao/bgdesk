@@ -439,7 +439,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         updateUrl.isNotEmpty &&
         !isCardClosed &&
         bind.mainUriPrefixSync().contains('bgdesk')) {
-      final isToUpdate = (isWindows || isMacOS) && bind.mainIsInstalled();
+      final isToUpdate = isLinux || ((isWindows || isMacOS) && bind.mainIsInstalled());
       String btnText = isToUpdate ? 'Update' : 'Download';
       GestureTapCallback onPressed = () async {
         final Uri url = Uri.parse(kBgdeskDownloadUrl);
@@ -457,7 +457,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           onPressed,
           closeButton: true,
           help: isToUpdate ? 'Changelog' : null,
-          link: isToUpdate ? updateUrl : null);
+          link: isToUpdate ? kBgdeskDownloadUrl : null);
     }
     if (systemError.isNotEmpty) {
       return buildInstallCard("", systemError, "", () {});

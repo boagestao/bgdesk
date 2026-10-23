@@ -42,10 +42,15 @@ conflitos mantendo as personalizações acima e atualize o manifesto.
 `scripts/update-rustdesk.sh` é um auxiliar de cópia e relatório; seus avisos de
 merge manual devem ser resolvidos antes de finalizar uma atualização.
 O script de branding preserva versões. A base upstream é 1.5.1, enquanto a
-revisão do aplicativo é 1.5.1-2 (Flutter 1.5.1-2+70); não redefinir a revisão
+revisão do aplicativo é 1.5.1-3 (Flutter 1.5.1-3+71); não redefinir a revisão
 nem os locks ao reaplicar branding. A primeira migração é manual.
 
 ## Atualizador assinado
+
+O fluxo Linux instala DEB/RPM/Arch após autorização gráfica Polkit e substitui
+AppImage sem root. Preserve a revalidação do feed e da cópia do pacote no helper
+privilegiado, a identificação do pacote instalado e o tratamento traduzido de
+falhas com acesso a `https://bgdesk.com`.
 
 As URLs de atualização aceitam somente releases de `boagestao/bgdesk`, e o
 identificador de pacote público é `bgdesk`. O formato de metadados e o contexto
@@ -53,8 +58,9 @@ criptográfico continuam compatíveis com as ferramentas de `res/update`.
 
 As chaves oficiais de assinatura do RustDesk foram removidas da lista de
 confiança do BGDesk. Antes de habilitar atualizações assinadas, configure as
-chaves públicas próprias em `src/update_metadata.rs` e publique metadados
-`bgdesk-update.json` e sua assinatura. Para atualização offline de um cliente
+chaves públicas próprias em `src/update_metadata.rs`. O canal online usa um único
+`latest.json` por edição, com versão, arquivos e assinatura embutida; não cria pastas
+por versão. O fluxo offline conserva `bgdesk-update.json` e sua assinatura. Para atualização offline de um cliente
 personalizado, use seu bundle ID como `--package-id`. A verificação automática
 permanece desabilitada para clientes personalizados, como anteriormente.
 

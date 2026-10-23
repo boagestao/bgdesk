@@ -1029,31 +1029,36 @@ pub(crate) fn url_has_explicit_port(raw_url: &str) -> bool {
 }
 
 fn clear_software_update_url() {
-    let mut update_url = SOFTWARE_UPDATE_URL.lock().unwrap();
-    *update_url = String::new();
+    *SOFTWARE_UPDATE_URL.lock().unwrap() = String::new();
+    crate::updater::clear_update_feed();
+    push_update_availability("");
+}
+
+fn push_update_availability(url: &str) {
+    #[cfg(feature = "flutter")]
+    {
+        let data = serde_json::json!({"name": "check_software_update_finish", "url": url});
+        let _ = crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, data.to_string());
+    }
+    #[cfg(not(feature = "flutter"))]
+    let _ = url;
 }
 
 fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
-    let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
-    let response_url = resp.url;
-    if response_url.is_empty() {
-        clear_software_update_url();
-        return Ok(());
-    }
-    let release_id = release_id_from_update_url(&response_url)?;
-    let latest_release_version = display_version_from_release_id(&release_id)?;
+    let feed = crate::update_metadata::verify_latest_feed(&bytes)?;
+    process_verified_software_update(feed)
+}
+
+pub(crate) fn process_verified_software_update(
+    feed: crate::update_metadata::VerifiedUpdateFeed,
+) -> ResultType<()> {
+    let latest_release_version = feed.version().to_owned();
+    let response_url = crate::update_source::latest_url();
 
     if crate::update_source::is_newer_update(&latest_release_version, crate::VERSION)? {
-        #[cfg(feature = "flutter")]
-        {
-            let mut m = HashMap::new();
-            m.insert("name", "check_software_update_finish");
-            m.insert("url", &response_url);
-            if let Ok(data) = serde_json::to_string(&m) {
-                let _ = crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, data);
-            }
-        }
-        *SOFTWARE_UPDATE_URL.lock().unwrap() = response_url;
+        crate::updater::cache_update_feed(feed);
+        *SOFTWARE_UPDATE_URL.lock().unwrap() = response_url.clone();
+        push_update_availability(&response_url);
     } else {
         clear_software_update_url();
     }
@@ -1121,7 +1126,7 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
                             return Err(err.into());
                         }
                     };
-                    if bytes.len() + chunk.len() > 16 * 1024 {
+                    if bytes.len() + chunk.len() > 1024 * 1024 {
                         clear_software_update_url();
                         bail!("Software update feed exceeds maximum size");
                     }
@@ -3008,30 +3013,12 @@ mod tests {
     }
 
     #[test]
-    fn website_update_feed_only_announces_newer_versions_and_clears_old_results() {
-        let newer = crate::update_source::release_url("v65535.0.0");
-        let response = serde_json::json!({"url": newer}).to_string();
-        process_software_update_check_response(Bytes::from(response)).unwrap();
-        assert_eq!(*SOFTWARE_UPDATE_URL.lock().unwrap(), newer);
-        let current = crate::update_source::release_url(crate::VERSION);
-        let response = serde_json::json!({"url": current}).to_string();
-        process_software_update_check_response(Bytes::from(response)).unwrap();
-        assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());
-        let [major, minor, patch, revision] = crate::update_source::parse_update_version(crate::VERSION).unwrap();
-        if revision < u16::MAX {
-            let next_revision = crate::update_source::release_url(
-                &format!("v{major}.{minor}.{patch}-{}", revision + 1));
-            let response = serde_json::json!({"url": next_revision}).to_string();
-            process_software_update_check_response(Bytes::from(response)).unwrap();
-            assert_eq!(*SOFTWARE_UPDATE_URL.lock().unwrap(), next_revision);
+    fn website_update_feed_rejects_unsigned_pointers_and_malformed_documents() {
+        for response in [r#"{"url":"https://bgdesk.com/updates/suporte/v65535.0.0/"}"#,
+                         r#"{"url":""}"#, "<html>SPA</html>",
+                         r#"{"version":"65535.0.0","artifacts":[]}"#] {
+            assert!(process_software_update_check_response(Bytes::from(response.to_owned())).is_err());
         }
-        *SOFTWARE_UPDATE_URL.lock().unwrap() = newer.clone();
-        process_software_update_check_response(Bytes::from_static(b"{\"url\":\"\"}")).unwrap();
-        assert!(SOFTWARE_UPDATE_URL.lock().unwrap().is_empty());
-        let other = newer.replace("bgdesk.com", "example.com");
-        let response = serde_json::json!({"url": other}).to_string();
-        assert!(process_software_update_check_response(Bytes::from(response)).is_err());
-        assert!(process_software_update_check_response(Bytes::from_static(b"<html>SPA</html>")).is_err());
     }
 
     #[test]

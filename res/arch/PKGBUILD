@@ -9,7 +9,7 @@ url='https://bgdesk.com'
 license=('AGPL-3.0-or-later')
 depends=('gtk3' 'xdotool' 'libxcb' 'libxfixes' 'alsa-lib' 'libva'
          'libayatana-appindicator' 'gst-plugins-base' 'gst-plugin-pipewire'
-         'libpulse' 'openssl' 'pam' 'systemd' 'procps-ng'
+         'libpulse' 'openssl' 'pam' 'systemd' 'procps-ng' 'polkit'
          'libdrm>=2.4.101' 'libglvnd')
 provides=('bgdesk')
 # Both editions use the same executable, desktop files and system service.
