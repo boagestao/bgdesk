@@ -42,11 +42,11 @@ class GitHubReleaseTests(unittest.TestCase):
             release.read_edition(self.manifest)
         gh.assert_not_called()
 
-    def test_existing_release_from_another_commit_is_never_overwritten(self):
-        with patch.object(release, 'release', return_value={'id': 1, 'target_commitish': 'old-commit'}), \
-             patch.object(release, 'gh') as gh:
-            with self.assertRaisesRegex(ValueError, 'another commit'):
-                release.ensure_release('owner/repo', 'tag', 'new-commit', 'title', 'notes', draft=False)
+    def test_existing_version_release_is_reused_even_from_another_commit(self):
+        existing = {'id': 1, 'target_commitish': 'old-commit', 'draft': False, 'assets': []}
+        with patch.object(release, 'release', return_value=existing), patch.object(release, 'gh') as gh:
+            self.assertEqual(release.ensure_release(
+                'owner/repo', 'v1.5.1-1', 'new-commit', 'title', 'notes', draft=True), existing)
         gh.assert_not_called()
 
     def test_draft_is_loaded_by_id_after_the_tag_endpoint_returns_404(self):
@@ -76,6 +76,15 @@ class GitHubReleaseTests(unittest.TestCase):
         self.assertEqual(captured, [{'tag_name': 'v1.5.1-1', 'target_commitish': 'a' * 40,
                                      'name': 'title', 'body': 'notes', 'draft': True,
                                      'prerelease': False, 'make_latest': 'false'}])
+
+    def test_concurrent_create_reuses_the_release_after_http_422(self):
+        existing = {'id': 4, 'tag_name': 'v1.5.1-1', 'draft': True, 'assets': []}
+        responses = [subprocess.CompletedProcess([], 1, '', 'gh: Validation Failed (HTTP 422)'),
+                     subprocess.CompletedProcess([], 0, json.dumps(existing), '')]
+        with patch.object(release, 'release', side_effect=[None, existing]), \
+             patch.object(release, 'gh', side_effect=responses):
+            self.assertEqual(release.ensure_release(
+                'owner/repo', 'v1.5.1-1', 'a' * 40, 'title', 'notes', draft=True), existing)
 
     def test_empty_draft_is_completed_even_when_the_current_commit_differs(self):
         draft = {'id': 1, 'draft': True, 'target_commitish': 'b' * 40, 'assets': []}
@@ -121,23 +130,22 @@ class GitHubReleaseTests(unittest.TestCase):
         self.manifest.write_text(json.dumps(records))
         return records
 
-    def test_windows_32_and_64_releases_expose_only_setup_and_matching_public_metadata(self):
+    def test_windows_32_and_64_editions_upload_only_setup_to_the_version_release(self):
         for arch in ('x86', 'x86_64'):
             records = self.windows_manifest(arch)
             uploads = []
             def capture(repo, tag, existing, files):
+                self.assertEqual(tag, 'v1.5.2')
                 uploads.extend(path.name for path in files)
-                manifest = next(p for p in files if p.name == 'artifacts-cliente.json')
-                self.assertEqual(json.loads(manifest.read_text()), [records[1]])
-                checksums = next(p for p in files if p.name == 'SHA256SUMS-cliente.txt')
-                self.assertEqual(checksums.read_text(), f"{records[1]['sha256']}  {records[1]['file_name']}\n")
-            with patch('sys.argv', ['release', '--manifest', str(self.manifest), '--commit', 'a' * 40,
-                                    '--run-id', '123']), \
-                 patch.object(release, 'ensure_release', return_value={'assets': []}), \
-                 patch.object(release, 'upload_files', side_effect=capture):
+            with patch('sys.argv', ['release', '--manifest', str(self.manifest), '--commit', 'a' * 40]), \
+                 patch.object(release, 'ensure_release', return_value={'assets': []}) as ensure, \
+                 patch.object(release, 'upload_files', side_effect=capture), \
+                 patch.object(release, 'delete_validation_prereleases') as cleanup:
                 release.main()
-            self.assertIn(records[1]['file_name'], uploads)
-            self.assertNotIn(records[0]['file_name'], uploads)
+            self.assertEqual(ensure.call_args.args[1], 'v1.5.2')
+            self.assertTrue(ensure.call_args.kwargs['draft'])
+            self.assertEqual(uploads, [records[1]['file_name']])
+            cleanup.assert_not_called()
             # Filtering public downloads does not permit a corrupt internal updater.
             (self.root / records[0]['file_name']).write_bytes(b'tampered')
             with self.assertRaisesRegex(ValueError, 'mismatch'):
@@ -164,13 +172,16 @@ class GitHubReleaseTests(unittest.TestCase):
         with patch('sys.argv', ['release', '--stable', '--version', '1.5.2', '--artifacts', str(self.root),
                                 '--commit', 'a' * 40]), \
              patch.object(release, 'ensure_release', return_value={'assets': []}), \
-             patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'), patch.object(release, 'release', return_value=None):
+             patch.object(release, 'upload_files') as upload, patch.object(release, 'gh'), \
+             patch.object(release, 'release', return_value=None), \
+             patch.object(release, 'delete_validation_prereleases') as cleanup:
             release.main()
         files = upload.call_args.args[-1]
         self.assertEqual(len(files), 23)
         windows = [p for p in files if '-windows-' in p.name]
         self.assertEqual(len(windows), 3)
         self.assertTrue(all('inno-exe' in p.name for p in windows))
+        cleanup.assert_called_once_with('boagestao/bgdesk')
 
         # Existing stable GitHub releases must preserve their original tag even
         # when R2's completion marker is absent.
@@ -179,11 +190,45 @@ class GitHubReleaseTests(unittest.TestCase):
              patch.object(release, 'release', return_value={'draft': False, 'prerelease': False,
                                                           'target_commitish': 'b' * 40}), \
              patch.object(release, 'reconcile_stable') as reconcile, \
-             patch.object(release, 'ensure_release') as create:
+             patch.object(release, 'ensure_release') as create, \
+             patch.object(release, 'delete_validation_prereleases') as cleanup:
             release.main()
         create.assert_not_called()
         self.assertEqual(reconcile.call_args.args[:2], ('boagestao/bgdesk', '1.5.2'))
         self.assertEqual(len(reconcile.call_args.args[2]), 26)
+        cleanup.assert_called_once_with('boagestao/bgdesk')
+
+    def test_stable_publish_deletes_only_validation_prereleases(self):
+        pages = [[
+            dict(tag_name='v1.5.1-1', prerelease=False, draft=False),
+            dict(tag_name='v1.5.1', prerelease=False, draft=False),
+            dict(tag_name='build-v1.5.1-1-windows-x86-1-1', prerelease=True, draft=False),
+            dict(tag_name='build-v1.5.1-linux-x86_64-2-1', prerelease=True, draft=False),
+        ]]
+        deleted = []
+        def gh(*args, **kwargs):
+            if args[:2] == ('api', '--paginate'):
+                return subprocess.CompletedProcess([], 0, json.dumps(pages), '')
+            if args[:2] == ('release', 'delete'):
+                self.assertEqual(args[3:], ('--repo', 'owner/repo', '--yes', '--cleanup-tag'))
+                deleted.append(args[2])
+                return subprocess.CompletedProcess([], 0, '', '')
+            raise AssertionError(args)
+        with patch.object(release, 'gh', side_effect=gh):
+            self.assertEqual(release.delete_validation_prereleases('owner/repo'),
+                             ['build-v1.5.1-1-windows-x86-1-1', 'build-v1.5.1-linux-x86_64-2-1'])
+        self.assertEqual(deleted, ['build-v1.5.1-1-windows-x86-1-1', 'build-v1.5.1-linux-x86_64-2-1'])
+
+    def test_per_edition_upload_skips_identical_files_already_on_the_version_release(self):
+        existing = {'id': 7, 'draft': False, 'prerelease': False, 'assets': [
+            {'name': self.asset.name, 'size': self.asset.stat().st_size,
+             'digest': 'sha256:' + release.digest(self.asset)}]}
+        with patch('sys.argv', ['release', '--manifest', str(self.manifest), '--commit', 'a' * 40]), \
+             patch.object(release, 'ensure_release', return_value=existing) as ensure, \
+             patch.object(release, 'gh') as gh:
+            release.main()
+        self.assertEqual(ensure.call_args.args[1], 'v1.5.1')
+        gh.assert_not_called()
 
     def existing_stable_fixture(self, missing):
         records, assets = [], []

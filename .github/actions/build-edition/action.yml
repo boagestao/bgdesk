@@ -145,7 +145,7 @@ runs:
         path: release-artifacts/${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.edition }}/*
         if-no-files-found: error
         retention-days: 14
-    - name: Publish finished packages to GitHub Releases
+    - name: Upload finished packages to the version GitHub Release
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

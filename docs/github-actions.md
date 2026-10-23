@@ -323,7 +323,7 @@ As saídas e manifests ficam separados por plataforma, arquitetura e edição.
 São produzidos `bgdesk-cliente-win32.exe` (Inno com serviço unattended) e
 `bgdesk-cliente-update-win32.exe` (atualizador nativo), ambos assinados e com
 timestamp. A arquitetura PE32, versão do executável e abertura de janela Sciter
-são verificadas antes de salvar os artefatos e publicar a pré-release.
+são verificadas antes de salvar os artefatos e enviá-los à release `v<versão>`.
 Win32 cliente e suporte passaram no run 39428395944, incluindo assinatura,
 janela Sciter e conferência dos quatro pacotes. Win32 está integrado à matriz
 `all` e à distribuição R2. A base acompanha o RustDesk upstream (1.5.1), com revisões funcionais BGDesk
@@ -348,9 +348,9 @@ artefato ou um EXE nativo não permite pular a compilação.
 
 Os pacotes reaproveitados são baixados, validados por versão/seletores/SHA256/tamanho
 e enviados como artefatos da execução atual com `build-source.json` registrando
-commit e run originais. Reaproveitar esses pacotes não cria nem altera releases
-ou tags: a publicação original continua como referência, sem duplicar os mesmos
-binários em uma nova pré-release.
+commit e run originais. Reaproveitar esses pacotes não cria pré-releases: a
+release `v<versão>` continua como referência, e arquivos idênticos já publicados
+não são enviados de novo.
 Se todos os alvos forem reaproveitados, até a geração do bridge é pulada.
 O job de publicação usa `always()` com sucesso explícito de preflight e build,
 para que esse bridge pulado não impeça a publicação da matriz reaproveitada.
@@ -364,19 +364,15 @@ nativos correspondentes dos assets públicos. Verifica os bytes existentes antes
 de qualquer alteração e mantém o tag/commit de destino original. Não reescreve
 os feeds ou metadados assinados da versão já anunciada no R2.
 
-Quando uma edição é compilada pela primeira vez, seu instalador é salvo como artefato do Actions
-**e** enviado para uma pré-release GitHub da plataforma/arquitetura, com nome
-`build-v<versão>-<plataforma>-<arquitetura>-<run>-<tentativa>`. A outra edição
-acrescenta seus arquivos à mesma pré-release quando termina. Os nomes são únicos,
-com manifests e SHA256SUMS separados por edição; hashes e tamanhos são verificados
-antes do envio e arquivos existentes com bytes diferentes nunca são sobrescritos.
-Essas pré-releases ficam visíveis em Releases mesmo se outro alvo falhar. Elas
-não alteram o feed de atualização automática. Os EXEs nativos de atualização
-ficam nos artefatos Actions e na raiz do R2, mas as pré-releases e a release
-estável do GitHub expõem somente Setups Windows. Os manifests e checksums
-públicos dessas pré-releases listam somente os arquivos expostos.
-Após todos os 26 pacotes internos passarem e o R2 terminar, a release estável
-`v<versão>` publica 23 arquivos, incluindo três Setups Windows e dois APKs universais.
+Quando uma edição é compilada, seu instalador é salvo como artefato do Actions
+**e** enviado à release GitHub `v<versão>` (rascunho até a matriz e o R2
+terminarem). Se o arquivo final já estiver nessa release com o mesmo hash e
+tamanho, o envio é pulado; bytes diferentes são recusados. Não há pré-releases
+`build-v*`. Os EXEs nativos de atualização ficam nos artefatos Actions e na raiz
+do R2; a release GitHub expõe somente Setups Windows. Após todos os 26 pacotes
+internos passarem e o R2 terminar, a release estável `v<versão>` fica pública
+com 23 arquivos, incluindo três Setups Windows e dois APKs universais, e remove
+qualquer pré-release `build-v*` antiga.
 
 A assinatura Windows informa separadamente exportação do certificado, confiança
 na CA temporária, assinatura, timestamp RFC3161 e verificação Authenticode.

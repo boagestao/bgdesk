@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Expose each completed edition immediately; publish a stable release only after R2."""
+"""Upload each edition to the version GitHub Release; publish it only after R2."""
 import argparse
 import base64
 import hashlib
@@ -85,21 +85,22 @@ def ensure_release(repository, tag, commit, title, notes, *, draft):
             'name': title,
             'body': notes,
             'draft': draft,
-            'prerelease': not draft,
+            'prerelease': False,
             'make_latest': 'false',
         }
         with tempfile.TemporaryDirectory() as temp:
             body = Path(temp) / 'release.json'
             body.write_text(json.dumps(payload))
-            existing = json.loads(gh('api', '--method', 'POST',
-                                     f'repos/{repository}/releases',
-                                     '--input', str(body)).stdout)
+            created = gh('api', '--method', 'POST', f'repos/{repository}/releases',
+                         '--input', str(body), check=False)
+        if created.returncode == 0:
+            existing = json.loads(created.stdout)
+        elif '422' in created.stderr:
+            existing = release(repository, tag)
+        else:
+            raise RuntimeError('Cannot create GitHub release: ' + created.stderr)
     if not existing or 'id' not in existing:
         raise RuntimeError('Created GitHub release cannot be found; refusing to upload packages')
-    # Drafts are untagged until publish. Keep the original target so a later CI
-    # commit can finish the same version; upload_files still verifies bytes.
-    if not existing.get('draft') and existing['target_commitish'] != commit:
-        raise ValueError('Release tag belongs to another commit; refusing to mix binaries')
     return existing
 
 
@@ -131,6 +132,26 @@ def upload_asset(repository, tag, path):
             break
         time.sleep(2 ** attempt)
     raise RuntimeError('Cannot upload package: ' + (result.stderr if result else ''))
+
+
+def is_validation_prerelease(item):
+    tag = item.get('tag_name') or ''
+    return tag.startswith('build-v') and (item.get('prerelease') or item.get('draft'))
+
+
+def delete_validation_prereleases(repository):
+    pages = json.loads(gh('api', '--paginate', '--slurp',
+                          f'repos/{repository}/releases?per_page=100').stdout)
+    removed = []
+    for item in [entry for page in pages for entry in page]:
+        if not is_validation_prerelease(item):
+            continue
+        tag = item['tag_name']
+        gh('release', 'delete', tag, '--repo', repository, '--yes', '--cleanup-tag')
+        removed.append(tag)
+    if removed:
+        print(f'Removed {len(removed)} validation pre-releases after the stable GitHub Release.')
+    return removed
 
 
 def reconcile_stable(repository, version, records):
@@ -187,37 +208,31 @@ def main():
         records = r2.read_records(args.artifacts, args.version)
         if args.reconcile_existing:
             reconcile_stable(args.repo, args.version, records)
-            return
-        tag = f'v{args.version}'
-        published = release(args.repo, tag)
-        # GitHub state is independent of R2's completion marker. Adding Android
-        # may be the first R2 publication of an existing stable GitHub version.
-        if published and not published.get('draft') and not published.get('prerelease'):
-            reconcile_stable(args.repo, args.version, records)
-            return
-        existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {args.version}',
-                                  'Todas as plataformas validadas e publicação R2 concluída.', draft=True)
-        public_files = [path for record, path in records if is_public_package(record)]
-        if {asset['name'] for asset in existing['assets']} - {path.name for path in public_files}:
-            raise ValueError('Stable release contains unexpected assets; refusing to publish non-Setup Windows packages')
-        upload_files(args.repo, tag, existing, public_files)
-        gh('release', 'edit', tag, '--repo', args.repo, '--draft=false', '--prerelease=false', '--latest')
-    else:
-        if not args.manifest or not args.run_id or not args.run_id.isdigit() or not args.attempt.isdigit():
-            parser.error('Edition manifest, run ID and numeric attempt are required')
-        (version, platform, arch, edition), files = read_edition(args.manifest)
-        tag = f'build-v{version}-{platform}-{arch}-{args.run_id}-{args.attempt}'
-        notes = (f'Pacotes de {platform}/{arch} publicados assim que cada edição termina.\n\n'
-                 f'Execução: https://github.com/{args.repo}/actions/runs/{args.run_id}\n\n'
-                 'Pré-release de validação; a atualização automática no R2 exige a matriz completa.')
-        existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {version} — {platform} {arch}', notes, draft=False)
-        with tempfile.TemporaryDirectory() as temp:
-            manifest_copy = Path(temp) / f'artifacts-{edition}.json'
-            public_records = [r for r in json.loads(args.manifest.read_text()) if is_public_package(r)]
-            manifest_copy.write_text(json.dumps(public_records, indent=2) + '\n')
-            checksums = Path(temp) / f'SHA256SUMS-{edition}.txt'
-            checksums.write_text(''.join(f'{digest(path)}  {path.name}\n' for path in files))
-            upload_files(args.repo, tag, existing, [*files, manifest_copy, checksums])
+        else:
+            tag = f'v{args.version}'
+            published = release(args.repo, tag)
+            # GitHub state is independent of R2's completion marker. Adding Android
+            # may be the first R2 publication of an existing stable GitHub version.
+            if published and not published.get('draft') and not published.get('prerelease'):
+                reconcile_stable(args.repo, args.version, records)
+            else:
+                existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {args.version}',
+                                          'Todas as plataformas validadas e publicação R2 concluída.', draft=True)
+                public_files = [path for record, path in records if is_public_package(record)]
+                if {asset['name'] for asset in existing['assets']} - {path.name for path in public_files}:
+                    raise ValueError('Stable release contains unexpected assets; refusing to publish non-Setup Windows packages')
+                upload_files(args.repo, tag, existing, public_files)
+                gh('release', 'edit', tag, '--repo', args.repo, '--draft=false', '--prerelease=false', '--latest')
+        delete_validation_prereleases(args.repo)
+        return
+    if not args.manifest:
+        parser.error('Edition manifest is required')
+    (version, _, _, _), files = read_edition(args.manifest)
+    tag = f'v{version}'
+    existing = ensure_release(args.repo, tag, args.commit, f'BGDesk {version}',
+                              'Pacotes publicados na release da versão assim que cada edição termina.',
+                              draft=True)
+    upload_files(args.repo, tag, existing, files)
 
 
 if __name__ == '__main__':
