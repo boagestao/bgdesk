@@ -6,9 +6,10 @@ O build verifica as credenciais antes de compilar. Se faltar certificado,
 credencial ou aprovação da Apple, ele falha sem gerar um novo DMG de distribuição.
 
 A saída é `bgdesk-suporte-darwin.dmg` (ou `bgdesk-cliente-darwin.dmg`) em
-`build/macOS-<arch>-<modo>/`. O DMG contém `BGDesk.app` e um atalho para
-`Applications`: o usuário abre a imagem e arrasta o app para Aplicativos.
-Esse é o arquivo para disponibilizar no site.
+`build/macOS-<arch>-<modo>/`. O DMG monta com o ícone de volume do BGDesk
+(`res/macos-dmg/volume-icon.icns`) e abre uma janela do Finder com a arte
+de arrastar o app para Aplicativos. Esse é o arquivo para disponibilizar
+no site.
 Os scripts `installers/install.sh` e `installers/install-client.sh` baixam esses
 DMGs de `https://boagestao.com.br/bgdesk/`, validam a equipe e o Gatekeeper da
 imagem e do app e só então copiam o app para Aplicativos.
@@ -80,8 +81,9 @@ binários e frameworks de dentro para fora, com Hardened Runtime, timestamp
 seguro e os entitlements de Release, sem `get-task-allow`.
 
 O script verifica a assinatura e a equipe, copia o app com `ditto` preservando
-os links simbólicos dos frameworks, acrescenta o atalho para Aplicativos e cria
-um DMG HFS+ comprimido, somente leitura, no formato UDZO. Em seguida, assina o
+os links simbólicos dos frameworks, acrescenta o atalho para Aplicativos, o
+ícone de volume e o fundo de instalação, posiciona os ícones no Finder e
+converte a imagem HFS+ para UDZO somente leitura. Em seguida, assina o
 DMG com Developer ID Application e timestamp seguro, envia essa imagem à Apple,
 exige status `Accepted` e anexa o ticket ao DMG (`stapler`). A notarização do
 contêiner também abrange o app dentro dele.

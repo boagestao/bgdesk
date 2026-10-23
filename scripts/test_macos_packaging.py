@@ -111,6 +111,11 @@ class MacOSPackagingTests(unittest.TestCase):
         mount = self.mount_image(archive)
         self.assertTrue(os.statvfs(mount).f_flag & os.ST_RDONLY)
         self.assertEqual(os.readlink(mount / "Applications"), "/Applications")
+        self.assertTrue((mount / ".VolumeIcon.icns").is_file())
+        self.assertTrue(
+            (mount / ".background/background.tiff").is_file()
+            or (mount / ".background/background.png").is_file()
+        )
         extracted = self.base / "extracted"
         delivered = extracted / "BGDesk.app"
         self.run_command(["ditto", mount / "BGDesk.app", delivered])
@@ -290,6 +295,11 @@ exit "$TEST_GATEKEEPER_EXIT"
         mount = self.mount_image(archive)
         self.assertTrue((mount / "BGDesk.app").is_dir())
         self.assertEqual(os.readlink(mount / "Applications"), "/Applications")
+        self.assertTrue((mount / ".VolumeIcon.icns").is_file())
+        self.assertTrue(
+            (mount / ".background/background.tiff").is_file()
+            or (mount / ".background/background.png").is_file()
+        )
         events = (self.base / "events").read_text().splitlines()
         self.assertEqual(events, ["notarytool history", "notarytool submit", "stapler staple",
                                   "stapler validate", "gatekeeper", "gatekeeper"])
