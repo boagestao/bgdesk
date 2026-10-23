@@ -41,7 +41,10 @@ ambiente uma vez e compila primeiro o cliente, depois o suporte, na mesma máqui
   `br.com.boagestao.bgdeskcliente`; o suporte preserva
   `br.com.boagestao.bgdesksuporte`. As edições compartilham a keystore existente.
   Antes de salvar o artefato, o CI verifica os quatro `.so` de cada ABI,
-  versão `1.5.1-1`, versionCode `69`, application ID e certificado de assinatura.
+  versão de `Cargo.toml`, versionCode de `flutter/pubspec.yaml`, application ID e
+  certificado de assinatura. O estado do feed assinado fica no módulo compartilhado
+  `update_metadata`, disponível também em Android/iOS; o módulo `updater` e seus
+  instaladores continuam exclusivos do desktop.
   O workflow Android antigo foi substituído pelo alvo `android` do `release.yml`.
   O `uni_links` fixado já usa o embedding v2; `scripts/patch-android-plugins.py`
   remove somente seu método estático legado `registerWith(Registrar)`, incompatível

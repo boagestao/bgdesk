@@ -3,7 +3,6 @@ use hbb_common::{bail, ResultType};
 use std::{path::PathBuf, sync::Mutex};
 
 lazy_static::lazy_static! {
-    static ref VERIFIED_UPDATE_FEED: Mutex<Option<crate::update_metadata::VerifiedUpdateFeed>> = Mutex::new(None);
     static ref VERIFIED_UPDATE_ARTIFACT: Mutex<Option<(VerifiedUpdateArtifact, Vec<u8>)>> = Mutex::new(None);
 }
 
@@ -102,23 +101,6 @@ pub(crate) fn verified_update_feed_for_download_url(download_url: &str) -> Resul
         .ok_or_else(|| hbb_common::anyhow::anyhow!("update artifact was not verified"))
 }
 
-pub(crate) fn cache_update_feed(feed: crate::update_metadata::VerifiedUpdateFeed) {
-    *VERIFIED_UPDATE_FEED.lock().unwrap() = Some(feed);
-}
-
-pub(crate) fn clear_update_feed() {
-    *VERIFIED_UPDATE_FEED.lock().unwrap() = None;
-}
-
-pub(crate) fn latest_update_version() -> String {
-    VERIFIED_UPDATE_FEED
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|feed| feed.version().to_owned())
-        .unwrap_or_default()
-}
-
 pub(super) fn verified_update_artifact_from_release_page_url(
     update_url: &str,
     query: &UpdateArtifactQuery<'_>,
@@ -135,16 +117,7 @@ fn verified_feed_for_url(
     if update_url != crate::update_source::latest_url() {
         bail!("Update URL is not the BGDesk signed latest feed");
     }
-    VERIFIED_UPDATE_FEED
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or_else(|| {
-            hbb_common::anyhow::anyhow!(
-                "No verified update feed available; check for updates again"
-            )
-        })
-        .cloned()
+    crate::update_metadata::cached_update_feed()
 }
 
 pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {

@@ -111,16 +111,20 @@ fn latest_feed_announces_only_newer_revisions_and_keeps_the_verified_snapshot() 
         crate::common::process_verified_software_update(feed).unwrap();
         assert_eq!(!crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().is_empty(), available);
         assert_eq!(crate::ui_interface::get_new_version(), if available { version } else { "" });
-        assert_eq!(crate::updater::latest_update_version(), if available { version } else { "" });
-        let selected = crate::updater::verified_update_artifact_for_release_page_url(
-            &crate::update_source::latest_url(), query());
-        assert_eq!(selected.is_ok(), available);
-        if let Ok(selected) = selected {
-            assert_eq!(selected.version, version);
-            assert_eq!(selected.sha256, SHA256);
+        assert_eq!(crate::update_metadata::latest_update_version(), if available { version } else { "" });
+        assert_eq!(crate::update_metadata::cached_update_feed().is_ok(), available);
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let selected = crate::updater::verified_update_artifact_for_release_page_url(
+                &crate::update_source::latest_url(), query());
+            assert_eq!(selected.is_ok(), available);
+            if let Ok(selected) = selected {
+                assert_eq!(selected.version, version);
+                assert_eq!(selected.sha256, SHA256);
+            }
+            assert!(crate::updater::verified_update_artifact_for_release_page_url(
+                "https://untrusted.example/latest.json", query()).is_err());
         }
-        assert!(crate::updater::verified_update_artifact_for_release_page_url(
-            "https://untrusted.example/latest.json", query()).is_err());
     }
 }
 

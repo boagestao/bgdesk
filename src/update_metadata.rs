@@ -11,6 +11,11 @@ use serde_derive::Deserialize;
 use std::sync::OnceLock;
 
 mod artifact;
+mod cache;
+
+pub(crate) use cache::{
+    cache_update_feed, cached_update_feed, clear_update_feed, latest_update_version,
+};
 
 #[cfg(target_os = "macos")]
 mod offline;

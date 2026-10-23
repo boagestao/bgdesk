@@ -1030,7 +1030,7 @@ pub(crate) fn url_has_explicit_port(raw_url: &str) -> bool {
 
 fn clear_software_update_url() {
     *SOFTWARE_UPDATE_URL.lock().unwrap() = String::new();
-    crate::updater::clear_update_feed();
+    crate::update_metadata::clear_update_feed();
     push_update_availability("");
 }
 
@@ -1056,7 +1056,7 @@ pub(crate) fn process_verified_software_update(
     let response_url = crate::update_source::latest_url();
 
     if crate::update_source::is_newer_update(&latest_release_version, crate::VERSION)? {
-        crate::updater::cache_update_feed(feed);
+        crate::update_metadata::cache_update_feed(feed);
         *SOFTWARE_UPDATE_URL.lock().unwrap() = response_url.clone();
         push_update_availability(&response_url);
     } else {

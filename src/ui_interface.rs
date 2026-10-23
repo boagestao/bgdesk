@@ -756,7 +756,7 @@ pub fn get_new_version() -> String {
     if SOFTWARE_UPDATE_URL.lock().unwrap().is_empty() {
         String::new()
     } else {
-        crate::updater::latest_update_version()
+        crate::update_metadata::latest_update_version()
     }
 }
 
