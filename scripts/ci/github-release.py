@@ -10,7 +10,15 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import tomllib
+
+# GraphQL finds drafts by pending tag name. REST /releases/tags/{tag} 404s, and
+# listing releases right after create is racy (cli/cli#6599).
+RELEASE_ID_BY_TAG = (
+    'query($owner:String!,$name:String!,$tagName:String!){'
+    'repository(owner:$owner,name:$name){release(tagName:$tagName){databaseId}}}'
+)
 
 
 def gh(*arguments, check=True):
@@ -55,31 +63,42 @@ def release(repository, tag):
     result = gh('api', f'repos/{repository}/releases/tags/{tag}', check=False)
     if result.returncode == 0:
         return json.loads(result.stdout)
-    if '404' in result.stderr:
-        # The tag endpoint only returns published releases. Authenticated lists
-        # include drafts, which must be reused when resuming a stable upload.
-        pages = json.loads(gh('api', '--paginate', '--slurp',
-                              f'repos/{repository}/releases?per_page=100').stdout)
-        matches = [item for page in pages for item in page if item['tag_name'] == tag]
-        if len(matches) > 1:
-            raise ValueError('Multiple releases have the same tag; refusing an ambiguous upload')
-        return matches[0] if matches else None
-    raise RuntimeError('Cannot query GitHub release: ' + result.stderr)
+    if '404' not in result.stderr:
+        raise RuntimeError('Cannot query GitHub release: ' + result.stderr)
+    owner, name = repository.split('/', 1)
+    payload = json.loads(gh('api', 'graphql',
+                            '-F', f'owner={owner}', '-F', f'name={name}',
+                            '-F', f'tagName={tag}', '-f', f'query={RELEASE_ID_BY_TAG}').stdout)
+    node = ((payload.get('data') or {}).get('repository') or {}).get('release') or {}
+    database_id = node.get('databaseId')
+    if not database_id:
+        return None
+    return json.loads(gh('api', f'repos/{repository}/releases/{database_id}').stdout)
 
 
 def ensure_release(repository, tag, commit, title, notes, *, draft):
     existing = release(repository, tag)
     if existing is None:
+        payload = {
+            'tag_name': tag,
+            'target_commitish': commit,
+            'name': title,
+            'body': notes,
+            'draft': draft,
+            'prerelease': not draft,
+            'make_latest': 'false',
+        }
         with tempfile.TemporaryDirectory() as temp:
-            body = Path(temp) / 'notes.md'
-            body.write_text(notes)
-            gh('release', 'create', tag, '--repo', repository, '--target', commit,
-               '--title', title, '--notes-file', str(body), '--latest=false',
-               '--draft' if draft else '--prerelease')
-        existing = release(repository, tag)
-    if existing is None:
+            body = Path(temp) / 'release.json'
+            body.write_text(json.dumps(payload))
+            existing = json.loads(gh('api', '--method', 'POST',
+                                     f'repos/{repository}/releases',
+                                     '--input', str(body)).stdout)
+    if not existing or 'id' not in existing:
         raise RuntimeError('Created GitHub release cannot be found; refusing to upload packages')
-    if existing['target_commitish'] != commit:
+    # Drafts are untagged until publish. Keep the original target so a later CI
+    # commit can finish the same version; upload_files still verifies bytes.
+    if not existing.get('draft') and existing['target_commitish'] != commit:
         raise ValueError('Release tag belongs to another commit; refusing to mix binaries')
     return existing
 
@@ -98,8 +117,20 @@ def upload_files(repository, tag, existing, files):
                 if digest(Path(temp) / path.name) != digest(path):
                     raise ValueError(f'Existing release asset has different bytes: {path.name}')
         else:
-            gh('release', 'upload', tag, str(path), '--repo', repository)
+            upload_asset(repository, tag, path)
     print(f'Packages available: https://github.com/{repository}/releases/tag/{tag}')
+
+
+def upload_asset(repository, tag, path):
+    result = None
+    for attempt in range(6):
+        result = gh('release', 'upload', tag, str(path), '--repo', repository, check=False)
+        if result.returncode == 0:
+            return
+        if 'not found' not in result.stderr.lower():
+            break
+        time.sleep(2 ** attempt)
+    raise RuntimeError('Cannot upload package: ' + (result.stderr if result else ''))
 
 
 def reconcile_stable(repository, version, records):

@@ -43,33 +43,59 @@ class GitHubReleaseTests(unittest.TestCase):
         gh.assert_not_called()
 
     def test_existing_release_from_another_commit_is_never_overwritten(self):
-        with patch.object(release, 'release', return_value={'target_commitish': 'old-commit'}), \
+        with patch.object(release, 'release', return_value={'id': 1, 'target_commitish': 'old-commit'}), \
              patch.object(release, 'gh') as gh:
             with self.assertRaisesRegex(ValueError, 'another commit'):
                 release.ensure_release('owner/repo', 'tag', 'new-commit', 'title', 'notes', draft=False)
         gh.assert_not_called()
 
-    def test_draft_on_a_later_page_is_reused_after_the_tag_endpoint_returns_404(self):
-        draft = {'id': 123, 'tag_name': 'v1.5.1', 'draft': True, 'target_commitish': 'a' * 40, 'assets': []}
+    def test_draft_is_loaded_by_id_after_the_tag_endpoint_returns_404(self):
+        draft = {'id': 123, 'tag_name': 'v1.5.1-1', 'draft': True, 'target_commitish': 'a' * 40, 'assets': []}
+        graphql = {'data': {'repository': {'release': {'databaseId': 123}}}}
         responses = [subprocess.CompletedProcess([], 1, '', 'gh: Not Found (HTTP 404)'),
-                     subprocess.CompletedProcess([], 0, json.dumps([[{'tag_name': 'other'}], [draft]]), '')]
+                     subprocess.CompletedProcess([], 0, json.dumps(graphql), ''),
+                     subprocess.CompletedProcess([], 0, json.dumps(draft), '')]
         with patch.object(release, 'gh', side_effect=responses) as gh:
-            found = release.ensure_release('owner/repo', 'v1.5.1', 'a' * 40, 'title', 'notes', draft=True)
+            found = release.ensure_release('owner/repo', 'v1.5.1-1', 'a' * 40, 'title', 'notes', draft=True)
         self.assertEqual(found, draft)
-        self.assertEqual(gh.call_count, 2)  # No second draft is created on resume.
-        self.assertEqual(gh.call_args.args, ('api', '--paginate', '--slurp',
-                                           'repos/owner/repo/releases?per_page=100'))
+        self.assertEqual(gh.call_count, 3)  # No second draft is created on resume.
+        self.assertEqual(gh.call_args_list[1].args[:2], ('api', 'graphql'))
+        self.assertIn('tagName=v1.5.1-1', gh.call_args_list[1].args)
+        self.assertEqual(gh.call_args.args, ('api', 'repos/owner/repo/releases/123'))
 
-    def test_new_draft_is_found_without_a_published_git_tag(self):
-        draft = {'target_commitish': 'a' * 40, 'draft': True, 'assets': []}
-        with patch.object(release, 'release', side_effect=[None, draft]), patch.object(release, 'gh') as gh:
-            self.assertEqual(release.ensure_release('owner/repo', 'tag', 'a' * 40, 'title', 'notes', draft=True), draft)
-        self.assertIn('--draft', gh.call_args.args)
+    def test_new_draft_uses_the_create_response_instead_of_requerying(self):
+        created = {'id': 9, 'target_commitish': 'a' * 40, 'draft': True, 'assets': []}
+        captured = []
+        def create(*args, **kwargs):
+            captured.append(json.loads(Path(args[args.index('--input') + 1]).read_text()))
+            return subprocess.CompletedProcess([], 0, json.dumps(created), '')
+        with patch.object(release, 'release', return_value=None), patch.object(release, 'gh', side_effect=create) as gh:
+            self.assertEqual(release.ensure_release('owner/repo', 'v1.5.1-1', 'a' * 40, 'title', 'notes', draft=True), created)
+        self.assertEqual(gh.call_count, 1)
+        self.assertEqual(gh.call_args.args[:3], ('api', '--method', 'POST'))
+        self.assertEqual(captured, [{'tag_name': 'v1.5.1-1', 'target_commitish': 'a' * 40,
+                                     'name': 'title', 'body': 'notes', 'draft': True,
+                                     'prerelease': False, 'make_latest': 'false'}])
+
+    def test_empty_draft_is_completed_even_when_the_current_commit_differs(self):
+        draft = {'id': 1, 'draft': True, 'target_commitish': 'b' * 40, 'assets': []}
+        with patch.object(release, 'release', return_value=draft), patch.object(release, 'gh') as gh:
+            self.assertEqual(release.ensure_release('owner/repo', 'v1.5.1-1', 'a' * 40, 'title', 'notes', draft=True), draft)
+        gh.assert_not_called()
 
     def test_missing_created_release_reports_a_clear_error(self):
-        with patch.object(release, 'release', return_value=None), patch.object(release, 'gh'):
+        with patch.object(release, 'release', return_value=None), \
+             patch.object(release, 'gh', return_value=subprocess.CompletedProcess([], 0, '{}', '')):
             with self.assertRaisesRegex(RuntimeError, 'cannot be found'):
                 release.ensure_release('owner/repo', 'tag', 'a' * 40, 'title', 'notes', draft=True)
+
+    def test_upload_retries_when_the_new_draft_is_not_visible_yet(self):
+        responses = [subprocess.CompletedProcess([], 1, '', 'release not found'),
+                     subprocess.CompletedProcess([], 0, '', '')]
+        with patch.object(release, 'gh', side_effect=responses) as gh, patch.object(release.time, 'sleep') as sleep:
+            release.upload_asset('owner/repo', 'v1.5.1-1', self.asset)
+        self.assertEqual(gh.call_count, 2)
+        sleep.assert_called_once_with(1)
 
     def test_query_errors_other_than_not_found_do_not_create_another_release(self):
         with patch.object(release, 'gh', return_value=subprocess.CompletedProcess([], 1, '', 'HTTP 403')) as gh:
