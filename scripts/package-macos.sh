@@ -353,6 +353,28 @@ prefer_ipv4_for_cloudkit() {
   done < <(networksetup -listallnetworkservices | tail -n +2)
 }
 
+# Same pinned binary as flutter-build.yml / playground.yml. Homebrew has no
+# rcodesign formula (it suggests cosign and the install fails).
+install_rcodesign() {
+  if command -v rcodesign >/dev/null 2>&1; then
+    return 0
+  fi
+  local version="0.22.0"
+  local dest="${TMPDIR:-/tmp}/bgdesk-apple-codesign-${version}"
+  local tarball="$dest/apple-codesign-${version}-macos-universal.tar.gz"
+  local url="https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${version}/apple-codesign-${version}-macos-universal.tar.gz"
+  mkdir -p "$dest"
+  if [[ ! -x "$dest/rcodesign" ]]; then
+    echo "[macOS] Homebrew não oferece rcodesign; baixando apple-codesign ${version}." >&2
+    curl -fL --retry 3 --retry-delay 2 -o "$tarball" "$url"
+    tar -xzf "$tarball" -C "$dest" --strip-components=1
+    rm -f "$tarball"
+  fi
+  [[ -x "$dest/rcodesign" ]] || fail "Falha ao instalar rcodesign ${version}."
+  PATH="$dest:$PATH"
+  export PATH
+}
+
 BGDESK_STAPLED_WITH_RCODESIGN=0
 staple_ticket() {
   local image="$1" status
@@ -370,9 +392,7 @@ staple_ticket() {
     return "$status"
   fi
   echo "[macOS] stapler não alcança o CloudKit (68). A notarização já foi Accepted; buscando o ticket com rcodesign." >&2
-  if ! command -v rcodesign >/dev/null 2>&1; then
-    HOMEBREW_NO_AUTO_UPDATE=1 brew install rcodesign
-  fi
+  install_rcodesign
   rcodesign staple "$image"
   BGDESK_STAPLED_WITH_RCODESIGN=1
 }
@@ -489,26 +509,29 @@ create_installer_image() {
 
   # Finder only sees volumes under /Volumes. A custom mountpoint makes
   # `tell disk` fail with -1728 on GitHub-hosted macOS runners.
-  local attach_info
+  local attach_info volume
   attach_info=$(hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw")
-  mount_point=$(printf '%s\n' "$attach_info" | volumes_path_from_attach)
-  [[ -n "$mount_point" && -d "$mount_point" ]] || fail "Não foi possível montar o DMG em /Volumes."
+  volume=$(printf '%s\n' "$attach_info" | volumes_path_from_attach)
+  [[ -n "$volume" && -d "$volume" ]] || fail "Não foi possível montar o DMG em /Volumes."
+  mount_point="$volume"
   mounted=1
   if command -v SetFile >/dev/null; then
-    SetFile -c icnC "$mount_point/.VolumeIcon.icns"
+    SetFile -c icnC "$volume/.VolumeIcon.icns"
   fi
-  apply_dmg_finder_layout "$mount_point" "$background_name" "$app_name"
+  apply_dmg_finder_layout "$volume" "$background_name" "$app_name"
   if command -v SetFile >/dev/null; then
-    SetFile -a C "$mount_point"
+    SetFile -a C "$volume"
   else
     xattr -wx com.apple.FinderInfo \
       0000000000000000040000000000000000000000000000000000000000000000 \
-      "$mount_point"
+      "$volume"
   fi
-  rm -rf "$mount_point/.fseventsd" || true
-  chmod -Rf -P go-w "$mount_point" >/dev/null 2>&1 || true
-  detach_with_retry "$mount_point" || fail "Não foi possível desmontar o DMG temporário."
+  rm -rf "$volume/.fseventsd" || true
+  chmod -Rf -P go-w "$volume" >/dev/null 2>&1 || true
+  detach_with_retry "$volume" || fail "Não foi possível desmontar o DMG temporário."
   mounted=0
+  # Readonly validation uses a private mountpoint. mkdir /Volumes/BGDesk is denied.
+  mount_point="$work_dir/mounted"
 
   rm -f "$output"
   # Compressed read-only UDIF keeps the signed framework symlinks.
@@ -603,6 +626,9 @@ if [[ "$local_build" == "0" ]]; then
 fi
 
 # Mount the actual delivered image read-only and validate its app and shortcut.
+# Keep this off /Volumes: the layout attach already used that name, and runners
+# cannot mkdir there.
+mount_point="$work_dir/mounted"
 hdiutil verify "$work_dir/final.dmg"
 mkdir -p "$mount_point"
 mounted=1

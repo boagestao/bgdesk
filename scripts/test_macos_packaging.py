@@ -372,6 +372,58 @@ fi
         ticket = self.run_command(['xattr', '-p', 'com.bgdesk.test-notary-ticket', archive])
         self.assertEqual(ticket.stdout.strip(), 'accepted')
 
+    def test_github_runner_downloads_rcodesign_instead_of_homebrew(self):
+        env, app, archive = self.mock_distribution_services()
+        tmp = self.base / "tmp"
+        tmp.mkdir()
+        payload = self.base / "apple-codesign-0.22.0-macos-universal"
+        payload.mkdir()
+        rcodesign = payload / "rcodesign"
+        rcodesign.write_text('''#!/bin/bash
+echo "rcodesign $*" >>"$TEST_EVENTS"
+if [[ "$1" == staple ]]; then
+  xattr -w com.bgdesk.test-notary-ticket accepted "$2"
+fi
+''')
+        rcodesign.chmod(0o755)
+        env.update(GITHUB_ACTIONS='true', TEST_STAPLE_FAILURES='99', TMPDIR=str(tmp))
+        self.fake_tool('networksetup', '''
+echo "networksetup $*" >>"$TEST_EVENTS"
+if [[ "$1" == "-listallnetworkservices" ]]; then
+  printf '%s\\n' 'An asterisk (*) denotes that a network service is disabled.' 'Ethernet'
+fi
+''')
+        self.fake_tool('sudo', '''
+echo "sudo $*" >>"$TEST_EVENTS"
+if [[ "$1" == "-n" ]]; then shift; fi
+"$@"
+''')
+        self.fake_tool('brew', '''
+echo "brew $*" >>"$TEST_EVENTS"
+exit 1
+''')
+        self.fake_tool('curl', f'''
+echo "curl $*" >>"$TEST_EVENTS"
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then
+    out="$2"
+    shift 2
+    continue
+  fi
+  shift
+done
+[[ -n "$out" ]]
+/usr/bin/tar -czf "$out" -C "{self.base}" "{payload.name}"
+''')
+        self.run_command(["bash", PACKAGE, app, archive], env=env)
+        events = (self.base / 'events').read_text().splitlines()
+        self.assertTrue(any(event.startswith('curl ') for event in events))
+        self.assertFalse(any(event.startswith('brew ') for event in events))
+        self.assertTrue(any(event.startswith('rcodesign staple ') for event in events))
+        ticket = self.run_command(['xattr', '-p', 'com.bgdesk.test-notary-ticket', archive])
+        self.assertEqual(ticket.stdout.strip(), 'accepted')
+
     def test_checkpoint_keeps_the_signed_image_when_a_later_phase_fails(self):
         env, app, archive = self.mock_distribution_services()
         env["TEST_NOTARY_STATUS"] = "Invalid"

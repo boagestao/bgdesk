@@ -90,6 +90,16 @@ class MacOSDmgAssetTests(unittest.TestCase):
             'hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint',
             script,
         )
+        self.assertNotIn("brew install rcodesign", script)
+        self.assertIn('version="0.22.0"', script)
+        self.assertIn("apple-codesign-${version}-macos-universal.tar.gz", script)
+        self.assertIn("install_rcodesign", script)
+        self.assertIn("rcodesign staple", script)
+        self.assertGreaterEqual(script.count('mount_point="$work_dir/mounted"'), 2)
+        self.assertIn(
+            'hdiutil attach -readonly -nobrowse -mountpoint "$mount_point"',
+            script,
+        )
 
     @unittest.skipUnless(shutil.which("rsvg-convert"), "rsvg-convert rasterizes the SVG sources")
     def test_committed_rasters_match_regenerated_svgs(self):

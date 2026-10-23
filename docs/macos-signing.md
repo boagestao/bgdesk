@@ -93,12 +93,15 @@ Depois do status `Accepted`, fora do GitHub Actions, `stapler staple` e
 segundos, sem reenviar a notarização. No runner do GitHub essa repetição não
 resolve: a conexão com `api.apple-cloudkit.com` cai em todas as tentativas
 (`NSURLError -1005`). O script desliga o IPv6 e, se o `stapler` ainda sair com
-68, busca o mesmo ticket com `rcodesign`, que não usa o CFNetwork. Erros de
-ticket inválido/revogado ou de gravação em disco encerram na hora e preservam
-o arquivo de saída anterior.
+68, busca o mesmo ticket com `rcodesign` (binário oficial `apple-codesign`
+0.22.0, o mesmo do empacotamento Flutter; o Homebrew não tem essa fórmula),
+que não usa o CFNetwork. Erros de ticket inválido/revogado ou de gravação em
+disco encerram na hora e preservam o arquivo de saída anterior.
 
 O script verifica a assinatura, o ticket e o Gatekeeper da imagem final, monta
-o DMG somente para leitura e valida a assinatura e o Gatekeeper do app incluído.
+o DMG somente para leitura num ponto de montagem no diretório de trabalho
+(não em `/Volumes`, usado só pelo Finder no layout) e valida a assinatura e o
+Gatekeeper do app incluído.
 Somente após essas verificações desmonta a imagem e substitui o arquivo de saída.
 Não é gerado ZIP.
 
