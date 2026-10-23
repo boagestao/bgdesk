@@ -6,6 +6,7 @@ from pathlib import Path
 import struct
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -230,6 +231,11 @@ touch "build/windows-$arch-$edition/bgdesk-$edition-$suffix.exe"
 printf '%s\\n' "$2" "$BGDESK_APP_VERSION" "$BGDESK_NUMERIC_VERSION" > compiler-arguments
 ''')
         iscc.chmod(0o755)
+        with (self.root / 'Cargo.toml').open('rb') as cargo:
+            version = tomllib.load(cargo)['package']['version']
+        numeric = subprocess.check_output(
+            [sys.executable, str(self.root / 'res/update/application_version.py'), version],
+            text=True).strip()
         for arch in ('x86', 'x86_64'):
             for edition in ('cliente', 'suporte'):
                 folder = self.root / f'build/windows-{arch}-{edition}/extracted'
@@ -240,9 +246,7 @@ printf '%s\\n' "$2" "$BGDESK_APP_VERSION" "$BGDESK_NUMERIC_VERSION" > compiler-a
                                cwd=self.root, env=dict(os.environ, INNO_SETUP_DIR=str(compiler)),
                                check=True, capture_output=True)
                 self.assertEqual((self.root / 'compiler-arguments').read_text().splitlines(),
-                                 ['/DBuildArch='+arch,
-                                  '1.5.1-1',
-                                  '1.5.1.1'])
+                                 ['/DBuildArch='+arch, version, numeric])
 
 
 if __name__ == '__main__':

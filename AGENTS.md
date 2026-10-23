@@ -5,6 +5,10 @@
 - A base do BGDesk acompanha o RustDesk upstream: atualmente **1.5.1**. Por instrução explícita do usuário, revisões funcionais BGDesk usam sufixo numérico: **1.5.1-1**, depois `1.5.1-2`, sem mudar a base.
 - Não incremente a versão apenas para empacotamento, inclusão de plataformas ou nova tentativa de publicação. Mudanças funcionais podem incrementar a revisão numérica autorizada; a base só muda ao sincronizar o RustDesk, ou por instrução explícita do usuário.
 - Mantenha `Cargo.toml`, `flutter/pubspec.yaml`, `libs/portable/Cargo.toml` e os respectivos `Cargo.lock` coerentes. O estado atual do Flutter é `1.5.1-2+70`.
+- Sempre que a versão do aplicativo mudar, ajuste **tudo** que o build e o preflight leem ou conferem nessa revisão, no mesmo commit. Não deixe um manifesto novo com testes, empacotadores ou docs de estado atual ainda na revisão anterior. O `release.yml` falha em "Validate release tools" se isso ficar para trás.
+- No bump: `Cargo.toml`, `Cargo.lock`, `libs/portable/Cargo.toml`, `libs/portable/Cargo.lock`, `flutter/pubspec.yaml` (revisão e `+N` do build), este `AGENTS.md` e `UPSTREAM.md`. Incremente o identificador de build do Flutter junto com a revisão (`+69` → `+70`).
+- Procure a revisão anterior no repositório e atualize asserts, scripts e textos que descrevem a versão **atual**. Fixtures que usam uma revisão antiga de propósito (exemplo de comparador, tag histórica) permanecem. Prefira ler `Cargo.toml` em vez de literal, quando o teste deve acompanhar a revisão vigente.
+- Antes de considerar o bump completo, rode o mesmo preflight do CI: `python -m unittest discover -s res/update -p 'test_*metadata*.py'`, `python -m unittest discover -s res/update -p 'test_website_release.py'`, `python -m unittest discover -s scripts/ci -p 'test_*.py'` e `bash scripts/check-linux-build-paths.sh`.
 - Diferencie versão do aplicativo de identificação de build/publicação (commit, run e tentativa). Não use uma versão fictícia do aplicativo para resolver colisões de artefatos. Não sobrescreva silenciosamente releases ou metadados assinados existentes com bytes diferentes.
 
 ## Reaproveitamento de builds
