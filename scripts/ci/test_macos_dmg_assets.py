@@ -85,6 +85,11 @@ class MacOSDmgAssetTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertIn("assert_installer_layout", script)
         self.assertIn("SetFile -a C", script)
+        self.assertIn('hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw"', script)
+        self.assertNotIn(
+            'hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint',
+            script,
+        )
 
     @unittest.skipUnless(shutil.which("rsvg-convert"), "rsvg-convert rasterizes the SVG sources")
     def test_committed_rasters_match_regenerated_svgs(self):

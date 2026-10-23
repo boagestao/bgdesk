@@ -377,9 +377,21 @@ staple_ticket() {
   BGDESK_STAPLED_WITH_RCODESIGN=1
 }
 
+volumes_path_from_attach() {
+  python3 -c '
+import sys
+for line in sys.stdin:
+    index = line.find("/Volumes/")
+    if index >= 0:
+        print(line[index:].rstrip())
+        break
+'
+}
+
 detach_with_retry() {
-  local target="$1" attempt=1
-  osascript -e 'tell application "Finder" to close (every window whose name is "BGDesk")' \
+  local target="$1" attempt=1 window
+  window=$(basename "$target")
+  osascript -e "tell application \"Finder\" to close (every window whose name is \"${window}\")" \
     >/dev/null 2>&1 || true
   while ! hdiutil detach "$target" -quiet; do
     if [[ "$attempt" -ge 8 ]]; then
@@ -392,10 +404,11 @@ detach_with_retry() {
 
 apply_dmg_finder_layout() {
   local mount="$1" background_name="$2" app_name="$3"
-  local script="$work_dir/dmg-layout.applescript" attempt=1 wait=0
+  local disk_name script="$work_dir/dmg-layout.applescript" attempt=1 wait=0
+  disk_name=$(basename "$mount")
   cat >"$script" <<EOF
 tell application "Finder"
-  tell disk "BGDesk"
+  tell disk "${disk_name}"
     open
     delay 1
     set current view of container window to icon view
@@ -423,6 +436,10 @@ tell application "Finder"
 end tell
 EOF
   open -a Finder >/dev/null 2>&1 || true
+  # create-dmg waits here: Finder on GitHub-hosted Macs often answers -1728
+  # ("Can't get disk") until the volume under /Volumes has been registered.
+  echo "[macOS] Aguardando o Finder reconhecer $disk_name..."
+  sleep 5
   while ! osascript "$script"; do
     if [[ "$attempt" -ge 5 ]]; then
       fail "Não foi possível aplicar o layout do Finder no DMG."
@@ -470,9 +487,13 @@ create_installer_image() {
   size_mb=$((min_mb + 20))
   hdiutil resize -size "${size_mb}m" "$rw"
 
-  mkdir -p "$mount_point"
+  # Finder only sees volumes under /Volumes. A custom mountpoint makes
+  # `tell disk` fail with -1728 on GitHub-hosted macOS runners.
+  local attach_info
+  attach_info=$(hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw")
+  mount_point=$(printf '%s\n' "$attach_info" | volumes_path_from_attach)
+  [[ -n "$mount_point" && -d "$mount_point" ]] || fail "Não foi possível montar o DMG em /Volumes."
   mounted=1
-  hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint "$mount_point" "$rw"
   if command -v SetFile >/dev/null; then
     SetFile -c icnC "$mount_point/.VolumeIcon.icns"
   fi
