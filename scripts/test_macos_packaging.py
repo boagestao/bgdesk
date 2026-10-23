@@ -3,7 +3,8 @@
 
 Run: python3 scripts/test_macos_packaging.py
 Notarization orchestration uses fake Apple responses; signature/DMG roundtrips
-use real codesign, hdiutil and ditto. No notarization upload is required.
+use real codesign, hdiutil and ditto. Layout comes from the committed .DS_Store,
+so these tests do not open Finder. No notarization upload is required.
 """
 import json
 import os
@@ -58,6 +59,10 @@ class MacOSPackagingTests(unittest.TestCase):
         path.chmod(0o755)
         return dict(self.env, PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
 
+    def mock_finder_layout(self):
+        """Keep PATH stubs for tests that fake Apple tools; layout is a copied .DS_Store."""
+        return self.env
+
     def make_app(self):
         app = self.base / "BGDesk.app"
         contents = app / "Contents"
@@ -111,7 +116,14 @@ class MacOSPackagingTests(unittest.TestCase):
         mount = self.mount_image(archive)
         self.assertTrue(os.statvfs(mount).f_flag & os.ST_RDONLY)
         self.assertEqual(os.readlink(mount / "Applications"), "/Applications")
-        self.assertTrue((mount / ".VolumeIcon.icns").is_file())
+        self.assertEqual(
+            (mount / ".VolumeIcon.icns").read_bytes(),
+            (ROOT / "res/macos-dmg/volume-icon.icns").read_bytes(),
+        )
+        self.assertEqual(
+            (mount / ".DS_Store").read_bytes(),
+            (ROOT / "res/macos-dmg/finder-layout.dsstore").read_bytes(),
+        )
         self.assertTrue(
             (mount / ".background/background.tiff").is_file()
             or (mount / ".background/background.png").is_file()
@@ -209,6 +221,13 @@ EOF''')
 
     def mock_distribution_services(self):
         """Test publication gates independently of Apple's external services."""
+        self.mock_finder_layout()
+        # Record only notarization retries, not other sleeps in the packager.
+        self.fake_tool("sleep", '''
+if [[ -f "$TEST_EVENTS" ]] && grep -qx 'notarytool submit' "$TEST_EVENTS"; then
+  echo "$1" >> "$TEST_EVENTS.sleeps"
+fi
+''')
         env = self.fake_tool("security", '''cat <<'EOF'
   1) 1111111111111111111111111111111111111111 "Developer ID Application: Test (3Z7C3Q7NMT)"
      1 valid identities found
@@ -307,7 +326,6 @@ exit "$TEST_GATEKEEPER_EXIT"
     def test_stapler_recovers_from_network_loss_without_resubmitting_notarization(self):
         env, app, archive = self.mock_distribution_services()
         env.update(TEST_STAPLE_FAILURES='1', TEST_VALIDATE_FAILURES='1')
-        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
         self.run_command(["bash", PACKAGE, app, archive], env=env)
         events = (self.base / 'events').read_text().splitlines()
         self.assertEqual(events.count('notarytool submit'), 1)
@@ -320,7 +338,6 @@ exit "$TEST_GATEKEEPER_EXIT"
     def test_persistent_stapler_network_failure_is_bounded_and_preserves_previous_dmg(self):
         env, app, archive = self.mock_distribution_services()
         env['TEST_STAPLE_FAILURES'] = '99'
-        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
         result = self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
         self.assertEqual(result.returncode, 68)
         self.assertEqual(archive.read_bytes(), b'previous release')
@@ -333,7 +350,6 @@ exit "$TEST_GATEKEEPER_EXIT"
     def test_revoked_ticket_is_not_retried_or_published(self):
         env, app, archive = self.mock_distribution_services()
         env.update(TEST_STAPLE_FAILURES='99', TEST_STAPLER_EXIT='77')
-        self.fake_tool('sleep', 'echo "$1" >> "$TEST_EVENTS.sleeps"')
         result = self.run_command(["bash", PACKAGE, app, archive], env=env, ok=False)
         self.assertEqual(result.returncode, 77)
         self.assertEqual(archive.read_bytes(), b'previous release')
@@ -477,7 +493,8 @@ done
         app = self.make_app()
         archive = self.base / "bgdesk-local.dmg"
         checkpoint = self.base / "checkpoint"
-        env = dict(self.env, BGDESK_CHECKPOINT_DIR=str(checkpoint))
+        env = dict(self.mock_finder_layout(), BGDESK_CHECKPOINT_DIR=str(checkpoint))
+        self.fake_tool("sleep", "exit 0")
         self.run_command(["bash", PACKAGE, "--local", app, archive], env=env)
         extracted = self.base / "extracted"
         extracted.mkdir()

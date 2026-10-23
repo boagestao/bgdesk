@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Rasterize the committed macOS DMG SVGs into PNG and ICNS files."""
+"""Rasterize the committed macOS DMG SVGs into PNG and ICNS files.
+
+The volume icon composites the White Drive (macOS Tahoe) PNG with a small
+BGDesk SVG badge; the Finder window background is a separate 800x400 artboard.
+"""
 from __future__ import annotations
 
 import argparse

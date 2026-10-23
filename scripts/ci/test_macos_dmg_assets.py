@@ -18,12 +18,10 @@ LAYOUT_MARKERS = (
     "volume-icon.icns",
     "background.png",
     "background@2x.png",
+    "finder-layout.dsstore",
     ".VolumeIcon.icns",
+    ".DS_Store",
     ".background",
-    "set the bounds of container window to {200, 120, 1000, 520}",
-    "set icon size to 128",
-    "set position of item \"${app_name}\" to {200, 190}",
-    "set position of item \"Applications\" to {600, 190}",
 )
 
 
@@ -62,12 +60,15 @@ class MacOSDmgAssetTests(unittest.TestCase):
         for blob in (volume, background):
             self.assertIn("#027af2", blob)
             self.assertIn("#0e538c", blob)
-        self.assertIn("scale(11)", volume)
+        self.assertIn("scale(11.2)", volume)
+        self.assertIn("white-drive-tahoe.png", volume)
+        self.assertIn("macosicons.com/icon/white-drive-macos-tahoe", volume)
         self.assertIn("Arraste para Aplicativos", background)
         self.assertIn("(200,190)", background)
         self.assertIn("(600,190)", background)
 
     def test_committed_rasters_match_the_expected_geometry(self):
+        self.assertEqual(png_size(ASSETS / "white-drive-tahoe.png"), (1024, 1024))
         self.assertEqual(png_size(ASSETS / "volume-icon.png"), (1024, 1024))
         self.assertEqual(png_size(ASSETS / "background.png"), BACKGROUND_SIZE)
         self.assertEqual(
@@ -78,6 +79,9 @@ class MacOSDmgAssetTests(unittest.TestCase):
         self.assertIn(b"ic10", types)
         self.assertIn(b"ic08", types)
         self.assertGreaterEqual(len(types), len(VOLUME_SIZES))
+        layout = (ASSETS / "finder-layout.dsstore").read_bytes()
+        self.assertGreater(len(layout), 100)
+        self.assertTrue(layout.startswith(b"\x00\x00\x00\x01Bud1"))
 
     def test_packager_installs_the_volume_icon_and_finder_art(self):
         script = PACKAGE.read_text()
@@ -85,9 +89,11 @@ class MacOSDmgAssetTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertIn("assert_installer_layout", script)
         self.assertIn("SetFile -a C", script)
-        self.assertIn('hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw"', script)
-        self.assertNotIn(
-            'hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint',
+        self.assertIn('cp "$assets/finder-layout.dsstore" "$volume/.DS_Store"', script)
+        self.assertNotIn("tell application \"Finder\"", script)
+        self.assertNotIn("open -a Finder", script)
+        self.assertIn(
+            'hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint "$volume"',
             script,
         )
         self.assertNotIn("brew install rcodesign", script)
@@ -105,7 +111,7 @@ class MacOSDmgAssetTests(unittest.TestCase):
     def test_committed_rasters_match_regenerated_svgs(self):
         with tempfile.TemporaryDirectory() as temporary:
             dest = Path(temporary)
-            for name in ("volume-icon.svg", "background.svg"):
+            for name in ("volume-icon.svg", "white-drive-tahoe.png", "background.svg"):
                 shutil.copyfile(ASSETS / name, dest / name)
             subprocess.run(
                 [sys.executable, str(GENERATE), "--assets", str(dest)],

@@ -172,6 +172,7 @@ assert_installer_layout() {
   [[ -L "$mount/Applications" && "$(readlink "$mount/Applications")" == /Applications ]] || \
     fail "Atalho para Aplicativos ausente no DMG."
   [[ -f "$mount/.VolumeIcon.icns" ]] || fail "Ícone de volume ausente no DMG."
+  [[ -f "$mount/.DS_Store" ]] || fail "Layout do Finder ausente no DMG."
   [[ -e "$mount/.background/background.tiff" || -e "$mount/.background/background.png" ]] || \
     fail "Arte de instalação ausente no DMG."
   if command -v GetFileInfo >/dev/null; then
@@ -397,22 +398,8 @@ staple_ticket() {
   BGDESK_STAPLED_WITH_RCODESIGN=1
 }
 
-volumes_path_from_attach() {
-  python3 -c '
-import sys
-for line in sys.stdin:
-    index = line.find("/Volumes/")
-    if index >= 0:
-        print(line[index:].rstrip())
-        break
-'
-}
-
 detach_with_retry() {
-  local target="$1" attempt=1 window
-  window=$(basename "$target")
-  osascript -e "tell application \"Finder\" to close (every window whose name is \"${window}\")" \
-    >/dev/null 2>&1 || true
+  local target="$1" attempt=1
   while ! hdiutil detach "$target" -quiet; do
     if [[ "$attempt" -ge 8 ]]; then
       return 1
@@ -422,84 +409,23 @@ detach_with_retry() {
   done
 }
 
-apply_dmg_finder_layout() {
-  local mount="$1" background_name="$2" app_name="$3"
-  local disk_name script="$work_dir/dmg-layout.applescript" attempt=1 wait=0
-  disk_name=$(basename "$mount")
-  cat >"$script" <<EOF
-tell application "Finder"
-  tell disk "${disk_name}"
-    open
-    delay 1
-    set current view of container window to icon view
-    set toolbar visible of container window to false
-    set statusbar visible of container window to false
-    set the bounds of container window to {200, 120, 1000, 520}
-    set opts to the icon view options of container window
-    tell opts
-      set icon size to 128
-      set text size to 16
-      set arrangement to not arranged
-    end tell
-    set background picture of opts to file ".background:${background_name}"
-    set position of item "${app_name}" to {200, 190}
-    set position of item "Applications" to {600, 190}
-    try
-      set extension hidden of item "${app_name}" to true
-    end try
-    close
-    open
-    delay 1
-    update without registering applications
-    delay 2
-  end tell
-end tell
-EOF
-  open -a Finder >/dev/null 2>&1 || true
-  # create-dmg waits here: Finder on GitHub-hosted Macs often answers -1728
-  # ("Can't get disk") until the volume under /Volumes has been registered.
-  echo "[macOS] Aguardando o Finder reconhecer $disk_name..."
-  sleep 5
-  while ! osascript "$script"; do
-    if [[ "$attempt" -ge 5 ]]; then
-      fail "Não foi possível aplicar o layout do Finder no DMG."
-    fi
-    echo "[macOS] Finder ainda não viu o volume; nova tentativa ($attempt/5)." >&2
-    sleep 2
-    attempt=$((attempt + 1))
-  done
-  while [[ ! -f "$mount/.DS_Store" ]]; do
-    if [[ "$wait" -ge 15 ]]; then
-      fail "O Finder não gravou o layout do DMG."
-    fi
-    sleep 1
-    wait=$((wait + 1))
-  done
-}
-
 create_installer_image() {
   local staging="$1" app_name="$2" output="$3"
   local assets="$ROOT/res/macos-dmg"
-  local rw="$work_dir/rw.dmg" background_name min_mb size_mb
+  local rw="$work_dir/rw.dmg" volume min_mb size_mb
 
   [[ -f "$assets/volume-icon.icns" ]] || fail "Ícone de volume ausente: $assets/volume-icon.icns"
   [[ -f "$assets/background.png" ]] || fail "Arte do DMG ausente: $assets/background.png"
   [[ -f "$assets/background@2x.png" ]] || fail "Arte Retina do DMG ausente: $assets/background@2x.png"
+  [[ -f "$assets/finder-layout.dsstore" ]] || fail "Layout do Finder ausente: $assets/finder-layout.dsstore"
 
   mkdir -p "$staging/.background"
   if command -v tiffutil >/dev/null; then
     tiffutil -cathidpicheck "$assets/background.png" "$assets/background@2x.png" \
       -out "$staging/.background/background.tiff"
-    background_name="background.tiff"
   else
-    cp "$assets/background.png" "$staging/.background/background.png"
-    background_name="background.png"
+    fail "tiffutil é necessário: o layout gravado aponta para .background/background.tiff."
   fi
-  cp "$assets/volume-icon.icns" "$staging/.VolumeIcon.icns"
-  if command -v SetFile >/dev/null; then
-    SetFile -c icnC "$staging/.VolumeIcon.icns"
-  fi
-
   rm -f "$rw"
   hdiutil create -volname BGDesk -fs HFS+ -fsargs "-c c=64,a=16,e=16" \
     -format UDRW -srcfolder "$staging" "$rw"
@@ -507,30 +433,29 @@ create_installer_image() {
   size_mb=$((min_mb + 20))
   hdiutil resize -size "${size_mb}m" "$rw"
 
-  # Finder only sees volumes under /Volumes. A custom mountpoint makes
-  # `tell disk` fail with -1728 on GitHub-hosted macOS runners.
-  local attach_info volume
-  attach_info=$(hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw")
-  volume=$(printf '%s\n' "$attach_info" | volumes_path_from_attach)
-  [[ -n "$volume" && -d "$volume" ]] || fail "Não foi possível montar o DMG em /Volumes."
+  # Layout is a committed .DS_Store; Finder does not need to see /Volumes.
+  volume="$work_dir/rw-volume"
+  mkdir -p "$volume"
+  hdiutil attach -readwrite -noverify -noautoopen -nobrowse -mountpoint "$volume" "$rw"
   mount_point="$volume"
   mounted=1
+  [[ -d "$volume/$app_name" ]] || fail "App ausente no volume: $app_name"
+  cp "$assets/volume-icon.icns" "$volume/.VolumeIcon.icns"
   if command -v SetFile >/dev/null; then
     SetFile -c icnC "$volume/.VolumeIcon.icns"
-  fi
-  apply_dmg_finder_layout "$volume" "$background_name" "$app_name"
-  if command -v SetFile >/dev/null; then
     SetFile -a C "$volume"
   else
     xattr -wx com.apple.FinderInfo \
       0000000000000000040000000000000000000000000000000000000000000000 \
       "$volume"
   fi
+  # Copy last so hdiutil/SetFile cannot replace the captured layout.
+  cp "$assets/finder-layout.dsstore" "$volume/.DS_Store"
+  assert_installer_layout "$volume"
   rm -rf "$volume/.fseventsd" || true
   chmod -Rf -P go-w "$volume" >/dev/null 2>&1 || true
   detach_with_retry "$volume" || fail "Não foi possível desmontar o DMG temporário."
   mounted=0
-  # Readonly validation uses a private mountpoint. mkdir /Volumes/BGDesk is denied.
   mount_point="$work_dir/mounted"
 
   rm -f "$output"

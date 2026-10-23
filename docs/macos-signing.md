@@ -6,9 +6,9 @@ O build verifica as credenciais antes de compilar. Se faltar certificado,
 credencial ou aprovação da Apple, ele falha sem gerar um novo DMG de distribuição.
 
 A saída é `bgdesk-suporte-darwin.dmg` (ou `bgdesk-cliente-darwin.dmg`) em
-`build/macOS-<arch>-<modo>/`. O DMG monta com o ícone de volume do BGDesk
-(`res/macos-dmg/volume-icon.icns`) e abre uma janela do Finder com a arte
-de arrastar o app para Aplicativos. Esse é o arquivo para disponibilizar
+`build/macOS-<arch>-<modo>/`. O DMG monta com o White Drive (macOS Tahoe) e um selo pequeno do BGDesk no
+centro (`res/macos-dmg/volume-icon.icns`) e abre uma janela do Finder com a
+arte de arrastar o app para Aplicativos. Esse é o arquivo para disponibilizar
 no site.
 Os scripts `installers/install.sh` e `installers/install-client.sh` baixam esses
 DMGs de `https://boagestao.com.br/bgdesk/`, validam a equipe e o Gatekeeper da
@@ -82,11 +82,19 @@ seguro e os entitlements de Release, sem `get-task-allow`.
 
 O script verifica a assinatura e a equipe, copia o app com `ditto` preservando
 os links simbólicos dos frameworks, acrescenta o atalho para Aplicativos, o
-ícone de volume e o fundo de instalação, posiciona os ícones no Finder e
+ícone de volume, o fundo de instalação e o layout gravado do Finder, e
 converte a imagem HFS+ para UDZO somente leitura. Em seguida, assina o
 DMG com Developer ID Application e timestamp seguro, envia essa imagem à Apple,
 exige status `Accepted` e anexa o ticket ao DMG (`stapler`). A notarização do
 contêiner também abrange o app dentro dele.
+
+O ícone de volume é o White Drive (macOS Tahoe) de
+https://macosicons.com/icon/white-drive-macos-tahoe-kfAbSZoEDB, com o selo
+pequeno do BGDesk no centro da face.
+O layout da janela (800 × 480, ícones em (200, 190) e (600, 190), ocultos em
+(2000, 2000)) fica em `res/macos-dmg/finder-layout.dsstore`, capturado uma vez
+neste Mac. O empacotador só copia esse arquivo para `.DS_Store`; o CI não abre
+o Finder. O volume monta num ponto privado, não em `/Volumes`.
 
 Depois do status `Accepted`, fora do GitHub Actions, `stapler staple` e
 `validate` repetem erros 68 até cinco vezes, com intervalos de 5, 10, 20 e 40
@@ -99,9 +107,8 @@ que não usa o CFNetwork. Erros de ticket inválido/revogado ou de gravação em
 disco encerram na hora e preservam o arquivo de saída anterior.
 
 O script verifica a assinatura, o ticket e o Gatekeeper da imagem final, monta
-o DMG somente para leitura num ponto de montagem no diretório de trabalho
-(não em `/Volumes`, usado só pelo Finder no layout) e valida a assinatura e o
-Gatekeeper do app incluído.
+o DMG somente para leitura num ponto de montagem no diretório de trabalho e
+valida a assinatura e o Gatekeeper do app incluído.
 Somente após essas verificações desmonta a imagem e substitui o arquivo de saída.
 Não é gerado ZIP.
 
@@ -144,7 +151,7 @@ Esses DMGs locais não atendem à distribuição via Gatekeeper em outros Macs.
 Os testes de regressão rodam com `python3 scripts/test_macos_packaging.py` no
 macOS. Eles verificam assinatura ad hoc, montagem e conteúdo do DMG com
 ferramentas reais; as respostas de notarização e Gatekeeper são simuladas para
-testar as condições de publicação.
+testar as condições de publicação. Nenhum teste abre o Finder.
 Não substituem a validação final com certificado Developer ID e a Apple.
 
 ## GitHub Actions
@@ -155,6 +162,8 @@ O fluxo de distribuição é `release.yml`, que chama o mesmo `build.sh mac` ou
 Secrets. A identidade e a equipe podem ser configuradas por Secrets opcionais.
 O `.p12` é decodificado no diretório temporário do runner; o empacotador cria e
 remove seu Keychain temporário. O perfil local do Keychain não é transferido.
+Os testes de empacotamento são executados localmente. Nos runners ARM e Intel,
+o workflow apenas compila e empacota as edições com as validações de distribuição.
 
 Para salvar as credenciais do `.env` sem imprimir valores:
 
