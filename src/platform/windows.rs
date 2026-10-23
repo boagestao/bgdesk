@@ -2811,11 +2811,50 @@ pub fn send_message_to_hnwd(
             &data_struct as *const COPYDATASTRUCT as _,
         );
         if show_window {
-            ShowWindow(window, SW_NORMAL);
-            SetForegroundWindow(window);
+            bring_window_to_foreground(window);
         }
     }
     return true;
+}
+
+fn bring_window_to_foreground(window: HWND) {
+    unsafe {
+        let mut pid: DWORD = 0;
+        GetWindowThreadProcessId(window, &mut pid);
+        if pid != 0 {
+            AllowSetForegroundWindow(pid);
+        }
+        if IsIconic(window) != 0 {
+            ShowWindow(window, SW_RESTORE);
+        } else {
+            ShowWindow(window, SW_SHOW);
+        }
+        BringWindowToTop(window);
+        SetForegroundWindow(window);
+    }
+}
+
+/// Restore and focus an already-running main window.
+///
+/// Returns `true` when a window was found so the caller can exit instead of
+/// starting a second GUI. The Flutter runner looks up the same class+title;
+/// Sciter (Windows x86 client) uses a different class, so the title-only
+/// fallback covers that edition.
+pub fn focus_existing_main_window() -> bool {
+    let app_name = crate::get_app_name();
+    let class_name = wide_string(FLUTTER_RUNNER_WIN32_WINDOW_CLASS);
+    let window_name = wide_string(&app_name);
+    unsafe {
+        let mut window = FindWindowW(class_name.as_ptr(), window_name.as_ptr());
+        if window.is_null() {
+            window = FindWindowW(std::ptr::null(), window_name.as_ptr());
+        }
+        if window.is_null() {
+            return false;
+        }
+        bring_window_to_foreground(window);
+        true
+    }
 }
 
 pub fn get_logon_user_token(user: &str, pwd: &str) -> ResultType<HANDLE> {

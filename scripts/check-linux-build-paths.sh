@@ -62,6 +62,11 @@ echo "-- Flutter Linux runtime --"
 require_grep flutter/linux/CMakeLists.txt 'BINARY_NAME "bgdesk"' 'CMake BINARY_NAME bgdesk'
 require_grep flutter/linux/CMakeLists.txt 'libbgdesk\.so' 'CMake links libbgdesk.so'
 require_grep flutter/linux/main.cc 'libbgdesk\.so' 'main.cc dlopen libbgdesk.so'
+require_grep flutter/linux/main.cc 'gIsInstallPage' 'Linux runner tracks --install'
+require_grep flutter/linux/my_application.cc 'present_existing_window' 'Linux presents existing Gtk window'
+require_grep flutter/linux/my_application.cc 'gIsInstallPage' 'Linux unique Gtk app except install'
+require_grep flutter/linux/my_application.cc 'bgdesk.connection-manager' 'Linux CM keeps distinct app id'
+require_grep src/core_main.rs 'try_focus_existing_linux_gui' 'Linux reuses running GUI via D-Bus'
 require_grep flutter/lib/models/native_model.dart "libbgdesk\.so" 'native_model DynamicLibrary libbgdesk.so'
 
 echo
@@ -77,6 +82,8 @@ require_file scripts/rename-windows-artifacts.ps1
 require_grep flutter/windows/CMakeLists.txt 'BINARY_NAME "bgdesk"' 'Windows CMake BINARY_NAME bgdesk'
 require_grep flutter/windows/CMakeLists.txt 'libbgdesk\.dll' 'Windows CMake links libbgdesk.dll'
 require_grep flutter/windows/runner/main.cpp 'libbgdesk\.dll' 'main.cpp LoadLibrary libbgdesk.dll'
+require_grep flutter/windows/runner/main.cpp 'SW_RESTORE' 'Windows restores existing main window'
+require_grep src/platform/windows.rs 'focus_existing_main_window' 'Windows focuses existing main window from core'
 require_grep flutter/lib/models/native_model.dart "libbgdesk\.dll" 'native_model DynamicLibrary libbgdesk.dll'
 require_grep build.py 'rename_windows_artifacts' 'build.py calls rename_windows_artifacts'
 require_grep build.py "hbb_name = 'bgdesk\.exe'" 'build.py Windows hbb_name bgdesk.exe'

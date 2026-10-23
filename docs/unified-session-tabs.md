@@ -30,6 +30,11 @@ também contam, e duas abas de terminal contam separadamente mesmo compartilhand
 uma FFI. Minimizar o aplicativo mantém as sessões. A saída explícita pelo
 sistema também oculta primeiro e preserva a auditoria cancelável antes de
 encerrar. A barra de abas não inclui um botão Sair.
+No Linux e no Windows, uma segunda abertura do aplicativo não cria outra
+instância da janela principal: restaura e foca a que já está em execução,
+inclusive se estiver oculta ou minimizada. O macOS já reabre pelo Dock.
+`--cm` continua com identificação própria; `--install` pode aparecer ao lado
+da janela principal.
 A barra flutuante remota tem um botão direto de transferência de arquivos,
 imediatamente antes do chat; o menu de controles não repete essa opção.
 O botão preserva o token da conexão e abre/seleciona a aba de arquivos do destino.

@@ -8,6 +8,7 @@
 #define BGDESK_LIB_PATH "libbgdesk.so"
 typedef bool (*RustDeskCoreMain)();
 bool gIsConnectionManager = false;
+bool gIsInstallPage = false;
 
 void print_help_install_pkg(const char* so);
 
@@ -72,6 +73,8 @@ int main(int argc, char** argv) {
   for (int i = 0; i < argc; i++) {
     if (strcmp(argv[i], "--cm") == 0) {
       gIsConnectionManager = true;
+    } else if (strcmp(argv[i], "--install") == 0) {
+      gIsInstallPage = true;
     }
   }
   g_autoptr(MyApplication) app = my_application_new();

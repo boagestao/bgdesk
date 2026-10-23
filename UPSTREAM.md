@@ -42,7 +42,7 @@ conflitos mantendo as personalizações acima e atualize o manifesto.
 `scripts/update-rustdesk.sh` é um auxiliar de cópia e relatório; seus avisos de
 merge manual devem ser resolvidos antes de finalizar uma atualização.
 O script de branding preserva versões. A base upstream é 1.5.1, enquanto a
-revisão do aplicativo é 1.5.1-1 (Flutter 1.5.1-1+69); não redefinir a revisão
+revisão do aplicativo é 1.5.1-2 (Flutter 1.5.1-2+70); não redefinir a revisão
 nem os locks ao reaplicar branding. A primeira migração é manual.
 
 ## Atualizador assinado

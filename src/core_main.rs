@@ -207,6 +207,14 @@ pub fn core_main() -> Option<CoreMainAction> {
         return None;
     }
     if args.is_empty() || crate::common::is_empty_uni_link(&args[0]) {
+        #[cfg(windows)]
+        if crate::platform::windows::focus_existing_main_window() {
+            return None;
+        }
+        #[cfg(all(target_os = "linux", feature = "flutter"))]
+        if try_focus_existing_linux_gui() {
+            return None;
+        }
         #[cfg(target_os = "macos")]
         {
             crate::platform::macos::try_remove_temp_update_dir(None);
@@ -844,6 +852,33 @@ fn try_send_by_dbus(uni_links: String) -> Option<Vec<String>> {
             return Some(Vec::new());
         }
     }
+}
+
+/// Ask a running Linux GUI to come to the front.
+///
+/// The Flutter main process owns the uni-link D-Bus name. If that name is
+/// already taken, send the empty URI prefix so Dart's `handleUriLink` restores
+/// and focuses the existing window. When another GUI process is visible but
+/// D-Bus is still starting, retry briefly. If it never answers, return false so
+/// the unique GtkApplication can still activate the first instance.
+#[cfg(all(target_os = "linux", feature = "flutter"))]
+fn try_focus_existing_linux_gui() -> bool {
+    use crate::dbus::invoke_new_connection;
+
+    let prefix = crate::get_uri_prefix();
+    if invoke_new_connection(prefix.clone()).is_ok() {
+        return true;
+    }
+    if !crate::check_process("", true) {
+        return false;
+    }
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if invoke_new_connection(prefix.clone()).is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

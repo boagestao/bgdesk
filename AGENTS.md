@@ -4,7 +4,7 @@
 
 - A base do BGDesk acompanha o RustDesk upstream: atualmente **1.5.1**. Por instrução explícita do usuário, revisões funcionais BGDesk usam sufixo numérico: **1.5.1-1**, depois `1.5.1-2`, sem mudar a base.
 - Não incremente a versão apenas para empacotamento, inclusão de plataformas ou nova tentativa de publicação. Mudanças funcionais podem incrementar a revisão numérica autorizada; a base só muda ao sincronizar o RustDesk, ou por instrução explícita do usuário.
-- Mantenha `Cargo.toml`, `flutter/pubspec.yaml`, `libs/portable/Cargo.toml` e os respectivos `Cargo.lock` coerentes. O estado atual do Flutter é `1.5.1-1+69`.
+- Mantenha `Cargo.toml`, `flutter/pubspec.yaml`, `libs/portable/Cargo.toml` e os respectivos `Cargo.lock` coerentes. O estado atual do Flutter é `1.5.1-2+70`.
 - Diferencie versão do aplicativo de identificação de build/publicação (commit, run e tentativa). Não use uma versão fictícia do aplicativo para resolver colisões de artefatos. Não sobrescreva silenciosamente releases ou metadados assinados existentes com bytes diferentes.
 
 ## Reaproveitamento de builds

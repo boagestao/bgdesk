@@ -18,16 +18,46 @@ GtkWidget *find_gl_area(GtkWidget *widget);
 void try_set_transparent(GtkWindow* window, GdkScreen* screen, FlView* view);
 
 extern bool gIsConnectionManager;
+extern bool gIsInstallPage;
 
 // Keep the incoming connection manager distinct from the main window for
 // compositor rules, on both native Wayland (app_id) and X11/XWayland (WM_CLASS).
 static constexpr char kConnectionManagerApplicationId[] =
     "bgdesk.connection-manager";
 
-GtkWidget *find_gl_area(GtkWidget *widget);
+// One Flutter GtkWindow per process. A second GApplication activate must
+// present this window instead of creating another FlView/engine.
+static GtkWindow* g_app_window = NULL;
+
+static void present_existing_window(GtkWindow* window) {
+  if (window == NULL) {
+    return;
+  }
+  gtk_widget_show(GTK_WIDGET(window));
+  gtk_window_deiconify(window);
+  gtk_window_present(window);
+}
+
+static void on_app_window_destroy(GtkWidget* widget, gpointer user_data) {
+  (void)widget;
+  (void)user_data;
+  g_app_window = NULL;
+}
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
+  if (g_app_window != NULL) {
+    present_existing_window(g_app_window);
+    return;
+  }
+
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows != NULL && windows->data != NULL) {
+    g_app_window = GTK_WINDOW(windows->data);
+    present_existing_window(g_app_window);
+    return;
+  }
+
   MyApplication* self = MY_APPLICATION(application);
   if (gIsConnectionManager) {
     // GtkWindow copies the program class at construction, before its first map.
@@ -97,6 +127,9 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
+
+  g_app_window = window;
+  g_signal_connect(window, "destroy", G_CALLBACK(on_app_window_destroy), NULL);
 }
 
 // Implements GApplication::local_command_line.
@@ -139,11 +172,21 @@ MyApplication* my_application_new() {
     // Set it before GApplication startup and before creating any windows.
     g_set_prgname(kConnectionManagerApplicationId);
   }
+  const char* application_id = gIsConnectionManager
+                                   ? kConnectionManagerApplicationId
+                                   : APPLICATION_ID;
+  // Default GApplication flags are unique: a second launch activates the
+  // running instance instead of opening another GUI. `--install` keeps
+  // G_APPLICATION_NON_UNIQUE so it can appear beside the main window, matching
+  // the Windows whitelist in flutter/windows/runner/main.cpp.
+  if (gIsInstallPage) {
+    return MY_APPLICATION(g_object_new(my_application_get_type(),
+                                       "application-id", application_id,
+                                       "flags", G_APPLICATION_NON_UNIQUE,
+                                       nullptr));
+  }
   return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", gIsConnectionManager
-                                         ? kConnectionManagerApplicationId
-                                         : APPLICATION_ID,
-                                     "flags", G_APPLICATION_NON_UNIQUE,
+                                     "application-id", application_id,
                                      nullptr));
 }
 

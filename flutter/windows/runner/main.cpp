@@ -90,6 +90,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Uri links dispatch
   HWND hwnd = ::FindWindowW(getWindowClassName(), app_name.c_str());
+  if (hwnd == NULL) {
+    hwnd = ::FindWindowW(nullptr, app_name.c_str());
+  }
   if (hwnd != NULL) {
     // Allow multiple flutter instances when being executed by parameters
     // contained in whitelists.
@@ -102,22 +105,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                     whitelist_param) != command_line_arguments.end();
     }
     if (!allow_multiple_instances) {
-      if (!command_line_arguments.empty()) {
-        // The process launched by the browser owns the foreground permission.
-        // Transfer it to the existing RustDesk process before dispatching the
-        // URI so that it can bring an existing session to the foreground.
-        DWORD pid = 0;
-        ::GetWindowThreadProcessId(hwnd, &pid);
-        if (pid != 0) {
-          ::AllowSetForegroundWindow(pid);
-        }
-        // Dispatch command line arguments
-        DispatchToUniLinksDesktop(hwnd);
+      // The process launched by the user owns the foreground permission.
+      // Transfer it to the existing instance before restoring/focusing.
+      DWORD pid = 0;
+      ::GetWindowThreadProcessId(hwnd, &pid);
+      if (pid != 0) {
+        ::AllowSetForegroundWindow(pid);
+      }
+      if (::IsIconic(hwnd)) {
+        ::ShowWindow(hwnd, SW_RESTORE);
       } else {
-        // Not called with arguments, or just open the app shortcut on desktop.
-        // So we just show the main window instead.
-        ::ShowWindow(hwnd, SW_NORMAL);
-        ::SetForegroundWindow(hwnd);
+        ::ShowWindow(hwnd, SW_SHOW);
+      }
+      ::BringWindowToTop(hwnd);
+      ::SetForegroundWindow(hwnd);
+      if (!command_line_arguments.empty()) {
+        DispatchToUniLinksDesktop(hwnd);
       }
       return EXIT_FAILURE;
     }

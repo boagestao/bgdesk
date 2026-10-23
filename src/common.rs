@@ -2979,6 +2979,16 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn empty_uni_link_is_a_focus_request() {
+        let prefix = crate::get_uri_prefix();
+        assert!(is_empty_uni_link(&prefix));
+        assert!(is_empty_uni_link(&format!("{prefix}/")));
+        assert!(is_empty_uni_link(&format!("{prefix}///")));
+        assert!(!is_empty_uni_link(&format!("{prefix}connect/123")));
+        assert!(!is_empty_uni_link("--cm"));
+    }
+
+    #[test]
     fn bgdesk_public_update_channel_does_not_change_custom_branding() {
         assert_eq!(get_app_name(), "BGDesk");
         assert!(is_custom_client());

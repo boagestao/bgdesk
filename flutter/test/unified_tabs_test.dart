@@ -334,4 +334,9 @@ void main() {
     expect(controller.state.value.pageController.page, 0);
     expect(controller.selectedTab?.key, 'home');
   });
+
+  test('empty uni link is a request to focus the existing window', () {
+    expect(common.urlLinkToCmdArgs(Uri.parse('bgdesk://')), isEmpty);
+    expect(common.urlLinkToCmdArgs(Uri.parse('bgdesk:///')), isEmpty);
+  });
 }
